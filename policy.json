@@ -1,0 +1,40 @@
+{
+  "policy_version": "1.0",
+  "description": "Human-reviewed policy for the synthetic AuthTrace invoice API.",
+  "rules": [
+    {
+      "id": "INV-READ-OWN",
+      "actor": "user",
+      "action": "read_invoice",
+      "resource": "invoice",
+      "condition": "invoice.owner_id == actor.user_id",
+      "expected": "allow"
+    },
+    {
+      "id": "INV-READ-OTHER",
+      "actor": "user",
+      "action": "read_invoice",
+      "resource": "invoice",
+      "condition": "invoice.owner_id != actor.user_id",
+      "expected": "deny"
+    },
+    {
+      "id": "INV-READ-ADMIN",
+      "actor": "admin",
+      "action": "read_invoice",
+      "resource": "invoice",
+      "condition": "actor.role == admin",
+      "expected": "allow"
+    }
+  ],
+  "scope": {
+    "base_url": "http://127.0.0.1:8000",
+    "allowed_hosts": [
+      "127.0.0.1",
+      "localhost"
+    ],
+    "default_methods": [
+      "GET"
+    ]
+  }
+}
