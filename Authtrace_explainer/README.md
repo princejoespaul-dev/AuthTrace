@@ -1,87 +1,56 @@
-# AuthTrace AI Explainer
+# Authtrace_explainer
 
-Optional, non-authoritative explainer for sanitized AuthTrace JSON reports. It adds plain-language explanations and code-aware authorization analysis using the OpenAI API. Deterministic test verdicts remain the source of truth.
+An optional, non-authoritative explainer for the AuthTrace starter repository. It consumes the sanitized JSON report created by `run_checks.py` and annotates each check with a plain-language explanation. It does **not** run security tests, calculate verdicts, or change `checks[*].verdict` or `overall`.
 
-## Features
+## Safety model
 
-- Explains expected-versus-observed authorization behavior.
-- Selects relevant source snippets from explicitly supplied demo API files.
-- Requests structured analysis: likely root cause, evidence basis, potential impact, recommended fix, verification steps, confidence, missing information, and source references.
-- Validates model output before including it in the report.
-- Keeps AI output separate from `checks[*].verdict` and top-level `overall`.
-- Falls back to deterministic explanations if the API key is missing or the response is unavailable/invalid.
-- Does not execute code or automatically apply fixes.
+- The existing deterministic test runner remains the sole source of verdicts.
+- Rules-only mode is the default and requires no extra dependencies.
+- Optional Ollama generation changes explanation wording only; invalid/unavailable model output falls back to rules.
+- Evidence is bounded and common credential formats are redacted before being sent to Ollama.
+- Use only the synthetic local demo data. This is a student-project helper, not a production security scanner.
 
-## Privacy and safety
+## Run from the repository root
 
-The OpenAI API is hosted. Selected source snippets and sanitized test fields are sent to OpenAI when AI mode is enabled. Review provider data-handling terms before using proprietary source. Do not provide production secrets, credentials, personal data, or real customer data.
-
-- Set `OPENAI_API_KEY` in your environment; never hardcode it or commit it.
-- Common secret-bearing report fields are omitted, common credential patterns are redacted, and `.env`, secrets, credentials, `.git`, dependency, build, and virtual-environment directories are excluded.
-- Only explicitly supplied source files/directories are considered; source selection is relevance-ranked and bounded.
-- Model findings are advisory and unverified. They cannot change deterministic verdicts.
-- Use synthetic data in the local demo.
-
-## Run from the AuthTrace repository root
-
-Generate the deterministic report with the demo API running:
+First generate the existing report with the demo API running:
 
 ```bash
 python run_checks.py
 ```
 
-Set your API key in your shell:
-
-macOS/Linux:
-
-```bash
-export OPENAI_API_KEY="your-api-key"
-```
-
-PowerShell:
-
-```powershell
-$env:OPENAI_API_KEY = "your-api-key"
-```
-
-### Rules-only mode
+Then run the rules-based explainer:
 
 ```bash
 python -m Authtrace_explainer.main
 ```
 
-### OpenAI explanation mode
+It reads `reports/latest.json` and writes `reports/explained_latest.json`. To specify paths:
 
 ```bash
-python -m Authtrace_explainer.main --use-openai
+python -m Authtrace_explainer.main --input reports/latest.json --output reports/explained_latest.json
 ```
 
-### OpenAI code-aware mode
+## Optional local Ollama wording
 
-Pass the directory or exact files containing demo API authorization logic. Change `app` to the actual source directory in your checkout.
+Start Ollama and pull a model first, for example `ollama pull llama3.2`. Then:
 
 ```bash
-python -m Authtrace_explainer.main --use-openai --source app
+python -m Authtrace_explainer.main --use-ollama
 ```
 
-Or pass files explicitly:
+Optional environment variables:
 
-```bash
-python -m Authtrace_explainer.main --use-openai --source app/main.py --source app/routes/invoices.py
-```
+- `AUTHTRACE_EXPLAINER_MODEL` (default `llama3.2`)
+- `AUTHTRACE_EXPLAINER_OLLAMA_URL` (default `http://127.0.0.1:11434/api/generate`)
 
-Defaults: input `reports/latest.json`; output `reports/explained_latest.json`.
-
-## Configuration
-
-- `OPENAI_API_KEY` — required for hosted analysis.
-- `AUTHTRACE_OPENAI_MODEL` — optional model override; defaults to `gpt-4.1-mini`.
-- `AUTHTRACE_OPENAI_BASE_URL` — optional compatible endpoint override; defaults to OpenAI Chat Completions API.
-
-Local Ollama remains available with `--use-ollama`.
+The program makes a bounded request to the configured local Ollama endpoint. Do not point it at an untrusted service or send production reports. If Ollama is unavailable or its response fails validation, rules-based wording is used.
 
 ## Tests
+
+Run from the repository root:
 
 ```bash
 python -m pytest Authtrace_explainer/tests -q
 ```
+
+The package uses only the Python standard library at runtime; pytest is already a dependency of the parent project.

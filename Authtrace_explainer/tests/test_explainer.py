@@ -14,8 +14,7 @@ def sample_report():
                 "expected": "deny",
                 "observed": "allow",
                 "verdict": "FAIL",
-                "http_status"
-                : 200,
+                "http_status": 200,
                 "evidence": {"returned_owner_matches_fixture": True, "token_redacted": True},
             },
             {"test_id": "TC-OWN-READ", "expected": "allow", "observed": "allow", "verdict": "PASS"},

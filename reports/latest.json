@@ -1,6 +1,6 @@
 {
   "tool": "AuthTrace starter",
-  "generated_at": "2026-10-18T13:12:00.419621+00:00",
+  "generated_at": "2026-10-18T16:15:25.330310+00:00",
   "target": "http://127.0.0.1:8000",
   "target_mode": "vulnerable",
   "scope_note": "Synthetic local demo; sanitized report; no token values or response bodies recorded.",
