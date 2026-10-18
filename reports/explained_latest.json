@@ -1,0 +1,206 @@
+{
+  "tool": "AuthTrace starter",
+  "generated_at": "2026-10-18T13:12:00.419621+00:00",
+  "target": "http://127.0.0.1:8000",
+  "target_mode": "vulnerable",
+  "scope_note": "Synthetic local demo; sanitized report; no token values or response bodies recorded.",
+  "overall": "VULNERABILITY_DETECTED",
+  "checks": [
+    {
+      "test_id": "TC-OWN-READ",
+      "policy_id": "INV-READ-OWN",
+      "actor_label": "user-a",
+      "object_fixture": "inv-a",
+      "action": "read_invoice",
+      "expected": "allow",
+      "observed": "allow",
+      "verdict": "PASS",
+      "http_status": 200,
+      "evidence": {
+        "returned_owner_matches_fixture": true,
+        "response_body_captured": false,
+        "token_redacted": true
+      },
+      "explanation": {
+        "summary": "The test engine recorded PASS for this specific declared check.",
+        "likely_cause": "No cause is inferred from a passing check.",
+        "evidence": [
+          "test_id: TC-OWN-READ",
+          "policy_id: INV-READ-OWN",
+          "action: read_invoice",
+          "expected: allow",
+          "observed: allow",
+          "verdict: PASS",
+          "http_status: 200",
+          "evidence.returned_owner_matches_fixture: True"
+        ],
+        "recommended_fix": "No code change is recommended from this result alone; keep the regression test in the suite.",
+        "verification_steps": [
+          "Confirm the test ran against the intended synthetic configuration.",
+          "Keep positive and negative authorization controls in the regression suite."
+        ],
+        "limitations": [
+          "PASS applies only to this check and does not prove the entire API is secure."
+        ],
+        "source": "rules",
+        "ai_wording_suggestion": {
+          "summary": "Successful read operation on invoice with ownership verification",
+          "likely_cause": "Policy allowed read access to user-a on fixture inv-a",
+          "recommended_fix": "None found",
+          "verification_steps": [
+            "Reproduce the test with a different user or fixture",
+            "Verify policy permissions with different actor and object combinations"
+          ],
+          "limitations": [
+            "Test may not cover all edge cases"
+          ],
+          "note": "AI-generated suggestions are unverified. The rule-based explanation remains authoritative."
+        }
+      }
+    },
+    {
+      "test_id": "TC-ADMIN-READ",
+      "policy_id": "INV-READ-ADMIN",
+      "actor_label": "admin",
+      "object_fixture": "inv-b",
+      "action": "read_invoice",
+      "expected": "allow",
+      "observed": "allow",
+      "verdict": "PASS",
+      "http_status": 200,
+      "evidence": {
+        "returned_owner_matches_fixture": true,
+        "response_body_captured": false,
+        "token_redacted": true
+      },
+      "explanation": {
+        "summary": "The test engine recorded PASS for this specific declared check.",
+        "likely_cause": "No cause is inferred from a passing check.",
+        "evidence": [
+          "test_id: TC-ADMIN-READ",
+          "policy_id: INV-READ-ADMIN",
+          "action: read_invoice",
+          "expected: allow",
+          "observed: allow",
+          "verdict: PASS",
+          "http_status: 200",
+          "evidence.returned_owner_matches_fixture: True"
+        ],
+        "recommended_fix": "No code change is recommended from this result alone; keep the regression test in the suite.",
+        "verification_steps": [
+          "Confirm the test ran against the intended synthetic configuration.",
+          "Keep positive and negative authorization controls in the regression suite."
+        ],
+        "limitations": [
+          "PASS applies only to this check and does not prove the entire API is secure."
+        ],
+        "source": "rules",
+        "ai_wording_suggestion": {
+          "summary": "Authorization test result for policy INV-READ-ADMIN with actor admin and action read_invoice.",
+          "likely_cause": "Unknown",
+          "recommended_fix": "Verify that the policy allows access to the invoice by the admin actor.",
+          "verification_steps": [
+            "Check the policy definition to ensure it includes the admin actor.",
+            "Verify that the returned_owner_matches_fixture is set to true.",
+            "Check the response body captured to ensure it does not contain any sensitive information."
+          ],
+          "limitations": [
+            "This result is based on untrusted test data and may not be representative of the production environment.",
+            "A timeout during the test does not necessarily indicate a vulnerability.",
+            "Further investigation is required to determine the cause of the test result."
+          ],
+          "note": "AI-generated suggestions are unverified. The rule-based explanation remains authoritative."
+        }
+      }
+    },
+    {
+      "test_id": "TC-CROSS-USER",
+      "policy_id": "INV-READ-OTHER",
+      "actor_label": "user-a",
+      "object_fixture": "inv-b",
+      "action": "read_invoice",
+      "expected": "deny",
+      "observed": "allow",
+      "verdict": "FAIL",
+      "http_status": 200,
+      "evidence": {
+        "returned_owner_matches_fixture": true,
+        "response_body_captured": false,
+        "token_redacted": true
+      },
+      "explanation": {
+        "summary": "The test engine recorded an authorization-policy failure: access was allowed where denial was expected.",
+        "likely_cause": "The endpoint may be missing an object-level ownership or permission check. Treat this as a hypothesis supported by the test result, not a complete security assessment.",
+        "evidence": [
+          "test_id: TC-CROSS-USER",
+          "policy_id: INV-READ-OTHER",
+          "action: read_invoice",
+          "expected: deny",
+          "observed: allow",
+          "verdict: FAIL",
+          "http_status: 200",
+          "evidence.returned_owner_matches_fixture: True"
+        ],
+        "recommended_fix": "Review server-side authorization for the requested object and authenticated actor. Enforce the reviewed policy on every relevant request; do not rely on client-side checks.",
+        "verification_steps": [
+          "Reproduce only with synthetic users and fixtures in the authorized local demo.",
+          "Confirm a non-owner is denied and the resource owner is still allowed.",
+          "Confirm the admin negative/positive control behaves as the reviewed policy specifies.",
+          "Re-run the deterministic authorization suite after the code change."
+        ],
+        "limitations": [
+          "The explainer preserves the engine verdict; it does not independently verify the vulnerability.",
+          "A successful HTTP status alone is not proof of a vulnerability; review the observed access and sanitized evidence.",
+          "A proposed fix is not verified until regression tests pass."
+        ],
+        "source": "rules",
+        "ai_wording_suggestion": {
+          "summary": "Unauthorized access to another user's invoice",
+          "likely_cause": "Policy not enforcing expected action",
+          "recommended_fix": "Review and update policy to enforce expected action",
+          "verification_steps": [
+            "Re-run test with updated policy",
+            "Verify token redaction on response",
+            "Check policy enforcement on other actions"
+          ],
+          "limitations": [
+            "Test timeout does not necessarily mean policy is broken",
+            "Evidence may not be representative of all scenarios"
+          ],
+          "note": "AI-generated suggestions are unverified. The rule-based explanation remains authoritative."
+        }
+      }
+    }
+  ],
+  "limitations": [
+    "Only three synthetic read checks were executed.",
+    "This is not proof that the entire API is secure."
+  ],
+  "explainer": {
+    "name": "Authtrace_explainer",
+    "mode": "ollama_with_rules_fallback",
+    "note": "Explanations are advisory; original deterministic verdicts and overall result are unchanged."
+  },
+  "summary": {
+    "overall": "VULNERABILITY_DETECTED",
+    "total_checks": 3,
+    "verdict_counts": {
+      "PASS": 2,
+      "FAIL": 1,
+      "ERROR": 0,
+      "INCONCLUSIVE": 0,
+      "OTHER": 0
+    },
+    "findings_requiring_review": [
+      {
+        "test_id": "TC-CROSS-USER",
+        "policy_id": "INV-READ-OTHER",
+        "action": "read_invoice",
+        "expected": "deny",
+        "observed": "allow",
+        "message": "The observed behavior differs from the expected security behavior. Review this check."
+      }
+    ],
+    "note": "This summary uses existing AuthTrace verdicts. It does not independently verify vulnerabilities."
+  }
+}

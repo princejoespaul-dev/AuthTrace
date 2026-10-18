@@ -1,0 +1,62 @@
+{
+  "tool": "AuthTrace starter",
+  "generated_at": "2026-10-18T13:12:00.419621+00:00",
+  "target": "http://127.0.0.1:8000",
+  "target_mode": "vulnerable",
+  "scope_note": "Synthetic local demo; sanitized report; no token values or response bodies recorded.",
+  "overall": "VULNERABILITY_DETECTED",
+  "checks": [
+    {
+      "test_id": "TC-OWN-READ",
+      "policy_id": "INV-READ-OWN",
+      "actor_label": "user-a",
+      "object_fixture": "inv-a",
+      "action": "read_invoice",
+      "expected": "allow",
+      "observed": "allow",
+      "verdict": "PASS",
+      "http_status": 200,
+      "evidence": {
+        "returned_owner_matches_fixture": true,
+        "response_body_captured": false,
+        "token_redacted": true
+      }
+    },
+    {
+      "test_id": "TC-ADMIN-READ",
+      "policy_id": "INV-READ-ADMIN",
+      "actor_label": "admin",
+      "object_fixture": "inv-b",
+      "action": "read_invoice",
+      "expected": "allow",
+      "observed": "allow",
+      "verdict": "PASS",
+      "http_status": 200,
+      "evidence": {
+        "returned_owner_matches_fixture": true,
+        "response_body_captured": false,
+        "token_redacted": true
+      }
+    },
+    {
+      "test_id": "TC-CROSS-USER",
+      "policy_id": "INV-READ-OTHER",
+      "actor_label": "user-a",
+      "object_fixture": "inv-b",
+      "action": "read_invoice",
+      "expected": "deny",
+      "observed": "allow",
+      "verdict": "FAIL",
+      "http_status": 200,
+      "evidence": {
+        "returned_owner_matches_fixture": true,
+        "response_body_captured": false,
+        "token_redacted": true
+      }
+    }
+  ],
+  "limitations": [
+    "Only three synthetic read checks were executed.",
+    "This is not proof that the entire API is secure."
+  ]
+}
