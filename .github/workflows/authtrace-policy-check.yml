@@ -1,0 +1,30 @@
+name: AuthTrace policy impact checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  policy-impact:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install test dependencies
+        run: python -m pip install --upgrade pip pytest httpx
+      - name: Test policy planner
+        run: python -m pytest -q tests/test_authtrace_pipeline.py
+      - name: Build policy impact plan and evidence artifacts
+        run: python authtrace_pipeline.py --fail-on-unmapped
+      - name: Upload policy impact report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: authtrace-policy-impact
+          path: |
+            reports/latest_pipeline.json
+            reports/dashboard.html
