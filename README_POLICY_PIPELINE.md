@@ -34,10 +34,15 @@ or path-traversing test references.
 
 ## Submit through the dashboard
 
-Start the synthetic API and control center on loopback:
+Start the services in separate terminals, from the repository root.
 
+Terminal 1 — synthetic API:
 ```bash
 uvicorn demo_api:app --host 127.0.0.1 --port 8000
+```
+
+Terminal 2 — control center:
+```bash
 uvicorn control_center:app --host 127.0.0.1 --port 8010
 ```
 
