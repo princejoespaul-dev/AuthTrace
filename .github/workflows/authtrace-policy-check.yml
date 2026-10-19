@@ -31,7 +31,7 @@ jobs:
             sleep 1
           done
           curl --fail --silent http://127.0.0.1:8000/health
-          python -m pytest -q test_authorization.py
+          python -m pytest -q
       - name: Prove vulnerable mode is detected from actual API responses
         run: |
           AUTH_TRACE_MODE=vulnerable python -m uvicorn demo_api:app --host 127.0.0.1 --port 8001 > /tmp/authtrace-vulnerable.log 2>&1 &
