@@ -1,5 +1,6 @@
 import html
 import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -113,6 +114,48 @@ class PolicyPipelineTests(unittest.TestCase):
 
     def test_target_safety_allows_loopback(self):
         self.assertEqual(safe_target("http://127.0.0.1:8000/"), "http://127.0.0.1:8000")
+
+    def test_selected_runner_classifies_timeout_separately(self):
+        plan = {"selected_tests": ["test_authorization.py::test_cross_user_access_matches_declared_mode"],
+                "items": []}
+        with patch("authtrace_pipeline.subprocess.run",
+                   side_effect=subprocess.TimeoutExpired(cmd=["pytest"], timeout=1)):
+            results, return_code, overall = run_selected(plan, "http://127.0.0.1:8000", timeout_seconds=1)
+        self.assertEqual(results[0]["verdict"], "TIMEOUT")
+        self.assertEqual(results[0]["error_class"], "TEST_TIMEOUT")
+        self.assertEqual(overall, "TIMEOUT")
+        self.assertNotEqual(return_code, 0)
+
+    def test_selected_runner_classifies_collection_errors(self):
+        plan = {"selected_tests": ["test_authorization.py::missing_test"], "items": []}
+        failed = subprocess.CompletedProcess(
+            args=["pytest"], returncode=2, stdout="ERROR: not found: test_authorization.py::missing_test"
+        )
+        with patch("authtrace_pipeline.subprocess.run", return_value=failed):
+            results, return_code, overall = run_selected(plan, "http://127.0.0.1:8000")
+        self.assertEqual(results[0]["verdict"], "ERROR")
+        self.assertEqual(results[0]["error_class"], "COLLECTION_OR_RUNNER_ERROR")
+        self.assertEqual(overall, "ERROR")
+        self.assertNotEqual(return_code, 0)
+
+    def test_selected_runner_parses_sanitized_policy_mismatch_evidence(self):
+        nodeid = "test_authorization.py::test_cross_user_access_matches_declared_mode"
+        plan = {"selected_tests": [nodeid], "items": [
+            {"rule_id": "INV-READ-OTHER", "test_nodeids": [nodeid]}
+        ]}
+        evidence = {"expected": "allow", "observed": "deny", "classification": "POLICY_MISMATCH",
+                    "security_invariant_violated": False}
+        output = "AUTHTRACE_EVIDENCE=" + json.dumps(evidence) + "\n1 failed"
+        failed = subprocess.CompletedProcess(args=["pytest"], returncode=1, stdout=output)
+        with patch("authtrace_pipeline.subprocess.run", return_value=failed):
+            results, return_code, overall = run_selected(
+                plan, "http://127.0.0.1:8000", {"INV-READ-OTHER": "allow"}
+            )
+        self.assertEqual(results[0]["verdict"], "POLICY_MISMATCH")
+        self.assertEqual(results[0]["rule_ids"], ["INV-READ-OTHER"])
+        self.assertEqual(results[0]["evidence"], evidence)
+        self.assertEqual(overall, "POLICY_MISMATCH")
+        self.assertNotEqual(return_code, 0)
 
     def test_empty_execution_selection_is_error_not_pass(self):
         results, return_code, overall = run_selected({"selected_tests": []}, "http://127.0.0.1:8000")
