@@ -202,6 +202,7 @@ def start_run(request: RunRequest):
         raise HTTPException(422, "No tests were selected because the policies have no mapped changes.")
     run_id, started_at = str(uuid.uuid4()), now()
     with connect_db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
         active = conn.execute("SELECT id FROM runs WHERE status='RUNNING' LIMIT 1").fetchone()
         if active:
             raise HTTPException(409, f"Run {active['id']} is already active.")
@@ -292,7 +293,7 @@ def submit_policy(request: PolicySubmission):
     except SystemExit as exc:
         raise HTTPException(422, str(exc)) from exc
     payload = json.dumps(request.policy, indent=2, ensure_ascii=False) + "\n"
-    temp_path = PROPOSAL_PATH.with_suffix(".json.tmp")
+    temp_path = PROPOSAL_PATH.with_name(f".{PROPOSAL_PATH.name}.{uuid.uuid4().hex}.tmp")
     temp_path.write_text(payload, encoding="utf-8")
     temp_path.replace(PROPOSAL_PATH)
     digest = hashlib.sha256(json.dumps(request.policy, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
