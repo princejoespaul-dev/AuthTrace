@@ -15,7 +15,7 @@ jobs:
           python-version: "3.11"
           cache: pip
       - name: Install test dependencies
-        run: python -m pip install --upgrade pip pytest httpx fastapi
+        run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt pytest
       - name: Compile Python modules
         run: python -m compileall -q authtrace_pipeline.py demo_api.py run_checks.py test_authorization.py control_center.py tests
       - name: Test policy planner
