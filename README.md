@@ -147,3 +147,54 @@ See [`README_POLICY_PIPELINE.md`](README_POLICY_PIPELINE.md) for policy diffing,
 4. Add retrieval source citations to every generated explanation.
 5. Measure seeded-flaw recall, false-positive rate, evidence completeness, and repeatability.
 6. Only then add BFLA, property-level authorization, or carefully isolated write tests.
+
+
+## 10. AuthTrace Security Control Center
+
+The new local-first dashboard connects the existing demo API, sanitized authorization runner, policy-diff pipeline, and persisted run history. It is a student-project workbench, not a production scanner.
+
+### Start the dashboard
+
+Install the core dependencies as above, then start two services in separate terminals from the repository root.
+
+**Terminal 1 — synthetic demo API**
+```bash
+uvicorn demo_api:app --host 127.0.0.1 --port 8000
+```
+
+**Terminal 2 — control center**
+```bash
+uvicorn control_center:app --host 127.0.0.1 --port 8010
+```
+
+Open http://127.0.0.1:8010 in your browser. The API documentation is available at http://127.0.0.1:8010/docs.
+
+On Windows PowerShell, the same `uvicorn` commands work after activating the virtual environment.
+
+### Implemented dashboard functionality
+
+- Live overview metrics and recent runs from the local SQLite database.
+- Guided execution of the existing three read-only synthetic invoice authorization checks, with an explicit local-target confirmation.
+- Persistent run status, duration, sanitized report data, and error records.
+- Policy diff backed by `authtrace_pipeline.py`, including changed fields, SHA-256 policy hashes, risk heuristic, and rationale.
+- Regression plan preview with mapped tests, deduplication, unmapped rules, and missing test-file checks. The plan is explicitly labeled as not executed.
+- Finding status persistence for a cross-user invoice-access finding detected by a run.
+- Evidence/run detail view and JSON report download.
+- Local target scope screen, implemented test catalog, appearance toggle, responsive layout, and empty/error states.
+
+### Verify the control center
+
+```bash
+python -m unittest tests.test_authtrace_pipeline tests.test_control_center -v
+pytest -v
+```
+
+The control-center run endpoint executes the fixed `run_checks.py` command using an argument list, without a shell, and applies a 30-second timeout. It only permits the local demo target `http://127.0.0.1:8000`; it does not enable arbitrary external target testing. Run history is stored in `reports/authtrace.db`, and the latest sanitized runner report is `reports/latest.json`.
+
+### Current limitations
+
+- BFLA role/action matrices, write authorization, ownership-field tampering, and broader property-level authorization are not implemented.
+- The policy regression planner is a preview only in the dashboard; the dashboard does not launch its selected arbitrary pytest node IDs.
+- The demo API's fixed/vulnerable mode is configured when the demo server starts. A finding is created when the runner observes the seeded cross-user access violation.
+- The control center uses a local SQLite file and is intended for local development, not multi-user deployment. Do not expose it to a public network.
+- Browser-to-demo connection status is separate from a security test result; a connection failure is not reported as a passed check.
