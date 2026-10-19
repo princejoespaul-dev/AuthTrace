@@ -24,26 +24,39 @@ def request_invoice(token: str, invoice_id: str) -> httpx.Response:
 
 def _observe(response: httpx.Response, expected: str, *, cross_user: bool = False) -> dict:
     """Record a sanitized outcome and independently evaluate the security invariant."""
-    observed_allow = response.status_code == 200
+    status = response.status_code
+    observed_allow = status == 200
+    observed_deny = status in {401, 403, 404}
+    body = None
     owner_id = None
+    malformed = False
     if observed_allow:
         try:
             body = response.json()
-            owner_id = body.get("owner_id") if isinstance(body, dict) else None
         except (ValueError, json.JSONDecodeError):
+            malformed = True
+        if not isinstance(body, dict):
+            malformed = True
             owner_id = "malformed-response"
-    observed = "allow" if observed_allow else "deny"
-    invariant_violated = bool(cross_user and observed_allow and owner_id == "user-b")
-    matches_policy = observed == expected and not (observed_allow and owner_id == "malformed-response")
+        else:
+            owner_id = body.get("owner_id")
+    observed = "allow" if observed_allow else "deny" if observed_deny else "error"
+    invariant_violated = bool(
+        cross_user and observed_allow and
+        (owner_id == "user-b" or (isinstance(body, dict) and body.get("id") == "inv-b"))
+    )
+    matches_policy = observed == expected and not malformed
     classification = (
         "SECURITY_REGRESSION" if invariant_violated
+        else "MALFORMED_RESPONSE" if malformed
+        else "API_ERROR" if not (observed_allow or observed_deny)
         else "POLICY_MISMATCH" if not matches_policy
         else "POLICY_MATCH"
     )
     evidence = {
         "expected": expected,
         "observed": observed,
-        "http_status": response.status_code,
+        "http_status": status,
         "returned_owner_id": owner_id,
         "policy_match": matches_policy,
         "security_invariant_violated": invariant_violated,
