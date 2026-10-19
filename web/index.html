@@ -78,7 +78,6 @@ document.addEventListener('change',e=>{if(e.target.matches('.fieldSelect')){/* s
 $('#quickRun').addEventListener('click',()=>go('lab'));
 $('#search').addEventListener('keydown',e=>{if(e.key==='Enter'){const q=e.target.value.trim().toLowerCase();const match=Object.entries(pageNames).find(([k,v])=>v.toLowerCase().includes(q));if(match)go(match[0]);else{toast('No matching workspace. Search navigation names such as Policy Diff or Reports.');}}});
 document.addEventListener('keydown',e=>{if(e.key==='/'&&!['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)){e.preventDefault();$('#search').focus()}if(e.key==='Escape'){$('#search').blur()}});
-$('#content').addEventListener('click',e=>{if(e.target.id==='launchRun')launchRun()});
 api('/api/health').then(()=>$('#connection').textContent='API connected').catch(()=>$('#connection').textContent='API unavailable');
 render();
 </script>
