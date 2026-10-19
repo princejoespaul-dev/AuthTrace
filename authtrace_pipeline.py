@@ -119,8 +119,16 @@ def rule_index(policy):
 
 
 def validate_mapping(mapping_doc):
+    """Validate the supported mapping schema without silently dropping entries."""
     if not isinstance(mapping_doc, dict):
         raise SystemExit("Test mapping must be a JSON object.")
+    extra = sorted(set(mapping_doc) - {"schema_version", "description", "mappings"})
+    if extra:
+        raise SystemExit("Unsupported test mapping field(s): " + ", ".join(extra))
+    if "schema_version" in mapping_doc and (not isinstance(mapping_doc["schema_version"], str) or not mapping_doc["schema_version"].strip()):
+        raise SystemExit("Test mapping schema_version must be a non-empty string.")
+    if "description" in mapping_doc and not isinstance(mapping_doc["description"], str):
+        raise SystemExit("Test mapping description must be a string.")
     mappings = mapping_doc.get("mappings")
     if not isinstance(mappings, list):
         raise SystemExit("Test mapping must contain a 'mappings' array.")
@@ -128,23 +136,30 @@ def validate_mapping(mapping_doc):
     for index, entry in enumerate(mappings):
         if not isinstance(entry, dict):
             raise SystemExit(f"Mapping at index {index} must be an object.")
+        extra_fields = sorted(set(entry) - {"policy_rule_ids", "test_nodeids", "test_area", "rationale"})
+        if extra_fields:
+            raise SystemExit(f"Mapping at index {index}: unsupported field(s): " + ", ".join(extra_fields))
         rule_ids = entry.get("policy_rule_ids")
         nodeids = entry.get("test_nodeids")
         if not isinstance(rule_ids, list) or not rule_ids:
             raise SystemExit(f"Mapping at index {index} must have non-empty policy_rule_ids.")
-        if any(not isinstance(x, str) or not x.strip() for x in rule_ids):
-            raise SystemExit(f"Mapping at index {index} contains an invalid policy rule ID.")
+        if any(not isinstance(x, str) or not x.strip() for x in rule_ids) or len(set(rule_ids)) != len(rule_ids):
+            raise SystemExit(f"Mapping at index {index} contains an invalid or duplicate policy rule ID.")
         if not isinstance(nodeids, list) or not nodeids:
             raise SystemExit(f"Mapping at index {index} must have non-empty test_nodeids.")
-        if any(not isinstance(x, str) or not x.strip() or "::" not in x for x in nodeids):
+        if any(not isinstance(x, str) or not x.strip() or "::" not in x or x.startswith("-") for x in nodeids):
             raise SystemExit(f"Mapping at index {index} contains an invalid pytest node ID.")
+        if len(set(nodeids)) != len(nodeids):
+            raise SystemExit(f"Mapping at index {index} contains duplicate pytest node IDs.")
+        for field in ("test_area", "rationale"):
+            if field in entry and not isinstance(entry[field], str):
+                raise SystemExit(f"Mapping at index {index}: {field} must be a string.")
         for rule_id in rule_ids:
             pair = (rule_id, tuple(nodeids))
             if pair in seen_pairs:
                 raise SystemExit(f"Duplicate mapping for policy rule {rule_id}.")
             seen_pairs.add(pair)
     return mappings
-
 
 def validate_mapping_rule_ids(mapping_doc, known_rule_ids):
     """Reject mappings that refer to policy rules absent from both policy versions."""
