@@ -150,7 +150,7 @@ The assistant sends only the question and retrieved knowledge snippets to Ollama
 demo_api.py             Local synthetic API (vulnerable/fixed modes)
 policy.json             Human-reviewed policy source of truth
 test_authorization.py   Deterministic pytest checks
-run_checks.py           HTTPX runner + sanitized JSON report
+run_checks.py           Compatibility CLI for the policy-driven selected-test runner
 rag_assistant.py        Local retrieval + optional Ollama explanation
 knowledge_base/         Curated source notes
 reports/                Generated reports
