@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 
 DEFAULT_POLICY = Path("policy.json")
 DEFAULT_POLICY_V2 = Path("policy.v2.json")
+DEFAULT_POLICY_PROPOSAL = Path("policy.proposed.json")
 DEFAULT_MAPPING = Path("test_mapping.json")
 DEFAULT_REPORT = Path("reports/latest_pipeline.json")
 DEFAULT_DASHBOARD = Path("reports/dashboard.html")
@@ -415,7 +416,7 @@ def run_selected(plan, base_url, expected_outcomes=None, timeout_seconds=30):
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Diff policies, select risk-ranked tests, execute them, and create evidence.")
     parser.add_argument("--old-policy", type=Path, default=DEFAULT_POLICY)
-    parser.add_argument("--new-policy", type=Path, default=DEFAULT_POLICY_V2)
+    parser.add_argument("--new-policy", type=Path, default=(DEFAULT_POLICY_PROPOSAL if DEFAULT_POLICY_PROPOSAL.exists() else DEFAULT_POLICY_V2))
     parser.add_argument("--mapping", type=Path, default=DEFAULT_MAPPING)
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT)
     parser.add_argument("--dashboard", type=Path, default=DEFAULT_DASHBOARD)
