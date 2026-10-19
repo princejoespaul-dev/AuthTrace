@@ -13,7 +13,7 @@ This is a student-project starter, not a production security scanner. It demonst
 - Use only systems you own or have explicit written authorization to test.
 - Use synthetic fixtures; do not put tokens or private response bodies in reports.
 - The current authorization demo and seeded checks are read-only; write/tenant-isolation coverage is not yet implemented.
-- `PASS`, `FAIL`, and `INCONCLUSIVE` describe the declared policy/test, not whether an entire API is secure.
+- `POLICY_MISMATCH` means observed behavior differs from the submitted policy; `SECURITY_REGRESSION` means an explicit security invariant was violated. Neither a pass nor an absence of findings proves the whole API is secure.
 
 ## 1. Setup
 
@@ -63,36 +63,62 @@ Synthetic bearer tokens:
 
 Do not reuse these demo tokens anywhere else.
 
-## 3. Run deterministic tests
+## 3. Run the policy-aware regression tests
 
-In terminal 2, from this directory:
+Start the API in fixed mode (the default) in terminal 1:
 
 ```bash
-pytest -v
+uvicorn demo_api:app --host 127.0.0.1 --port 8000
 ```
 
-The suite expects the **fixed** API by default. For vulnerable-mode demonstration:
+In terminal 2, run the test suite:
+
+```bash
+python -m pytest -q
+```
+
+The tests compare actual HTTP outcomes with policy expectations and independently enforce the cross-user invoice access invariant. Do not set an environment variable to force vulnerable behavior to pass: a foreign invoice returned to a non-owner is reported as a security regression.
+
+## 4. Run the dashboard workflow end to end
+
+Keep the demo API running, then start the control center in a second terminal:
+
+```bash
+uvicorn control_center:app --host 127.0.0.1 --port 8010
+```
+
+Open [http://127.0.0.1:8010](http://127.0.0.1:8010) and follow these steps:
+
+1. Open **Policy Diff** and edit the proposed policy JSON.
+2. Select **Validate policy** to see actionable schema errors before saving.
+3. Select **Submit policy**. The validated proposal is saved to `policy.proposed.json`; `policy.json` remains the immutable baseline.
+4. Select **Compare policies** to review added, removed, and modified rules with before/after values and policy hashes.
+5. Open **Regression Planner** to review selected pytest node IDs, selection rationale, and unmapped rules.
+6. Select **Run Selected Tests**. Only tests mapped to changed policy rules are executed against the local demo API.
+7. Open **Test Runs** or **Evidence Explorer** to inspect the run-specific report, expected versus observed outcomes, status classifications, policy hashes, and sanitized evidence.
+
+The checked-in `policy.v2.json` is an illustrative proposal that changes cross-user invoice access from `deny` to `allow`. Against the fixed API, that proposal produces a **policy mismatch** because the API correctly denies the request. To demonstrate a genuine security regression, stop the API and restart it in vulnerable mode:
 
 **Windows PowerShell**
 ```powershell
-$env:AUTH_TRACE_EXPECT_VULNERABLE="1"
-pytest -v
+$env:AUTH_TRACE_MODE="vulnerable"
+uvicorn demo_api:app --host 127.0.0.1 --port 8000
 ```
 
 **macOS/Linux**
 ```bash
-AUTH_TRACE_EXPECT_VULNERABLE=1 pytest -v
+AUTH_TRACE_MODE=vulnerable uvicorn demo_api:app --host 127.0.0.1 --port 8000
 ```
 
-The cross-user test should fail in fixed mode only if the API unexpectedly exposes User B's invoice. In vulnerable mode, set the expectation variable so the seeded flaw is detected as expected. Do not interpret a successful test run against vulnerable mode as a secure result; it means the test correctly recognized the seeded flaw.
+Run the selected regression again. If the API returns User B's invoice to User A, AuthTrace reports a **security regression** even when the submitted policy says `allow`, because the separate cross-user access invariant still forbids that behavior. Restart in fixed mode when finished.
 
-## 4. Generate an evidence report
+For a terminal-only run using the same diff/validation/mapping/execution pipeline as the dashboard:
 
 ```bash
-python run_checks.py
+python authtrace_pipeline.py --execute --report reports/latest_pipeline.json --dashboard reports/dashboard.html
 ```
 
-Set `AUTH_TRACE_EXPECT_VULNERABLE=1` for vulnerable mode. The runner uses a local target by default and writes `reports/latest.json`. Reports contain no token values or full response bodies.
+The compatibility command `python run_checks.py` uses that same pipeline and writes the latest report to `reports/latest.json`.
 
 ## 5. Local RAG
 
@@ -136,7 +162,7 @@ See [`README_POLICY_PIPELINE.md`](README_POLICY_PIPELINE.md) for policy diffing,
 
 ## 8. Known limitations
 
-- The demo currently covers invoice reads; write authorization, denied-write integrity, tenant isolation, and a full vulnerable/fixed/regression automation are not implemented yet.
+- The demo currently covers synthetic invoice reads. Write authorization, denied-write integrity, and broader tenant-isolation scenarios are outside this competition-focused implementation.
 - A green planner test run validates policy-diff mechanics, not the security of a running API.
 - JSON evidence includes run timestamps and run IDs, so byte-for-byte report output is not identical across runs; policy hashes and test selection are stable for identical inputs.
 
