@@ -1,4 +1,4 @@
-"Optional local retrieval dependencies for rag_assistant.py."
+# Optional local retrieval dependencies for rag_assistant.py
 -r requirements.txt
 sentence-transformers>=3.0
 numpy>=1.26
