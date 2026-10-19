@@ -48,6 +48,25 @@ class PolicyApiTests(unittest.TestCase):
         self.assertIn("selected_tests", result)
         self.assertIn("unmapped_rules", result)
 
+    def test_policy_validation_endpoint_rejects_missing_expected_outcome(self):
+        policy = control_center.read_json(control_center.ROOT / "policy.json")
+        policy["rules"][0].pop("expected")
+        with self.assertRaises(HTTPException) as caught:
+            control_center.validate_submitted_policy(control_center.PolicySubmission(policy=policy))
+        self.assertEqual(caught.exception.status_code, 422)
+        self.assertIn("expected", caught.exception.detail)
+
+    def test_policy_submission_saves_proposal_without_overwriting_baseline(self):
+        policy = control_center.read_json(control_center.ROOT / "policy.json")
+        baseline_bytes = (control_center.ROOT / "policy.json").read_bytes()
+        with tempfile.TemporaryDirectory() as directory:
+            proposal_path = Path(directory) / "policy.proposed.json"
+            with patch.object(control_center, "PROPOSAL_PATH", proposal_path):
+                result = control_center.submit_policy(control_center.PolicySubmission(policy=policy))
+                self.assertTrue(result["saved"])
+                self.assertEqual(json.loads(proposal_path.read_text(encoding="utf-8")), policy)
+        self.assertEqual((control_center.ROOT / "policy.json").read_bytes(), baseline_bytes)
+
     def test_invalid_json_reports_a_readable_error(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "broken.json"
