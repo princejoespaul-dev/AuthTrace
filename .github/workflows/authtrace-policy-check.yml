@@ -15,12 +15,12 @@ jobs:
           python-version: "3.11"
           cache: pip
       - name: Install test dependencies
-        run: python -m pip install --upgrade pip pytest httpx
+        run: python -m pip install --upgrade pip pytest httpx fastapi
       - name: Compile Python modules
-        run: python -m compileall -q authtrace_pipeline.py demo_api.py run_checks.py test_authorization.py tests
+        run: python -m compileall -q authtrace_pipeline.py demo_api.py run_checks.py test_authorization.py control_center.py tests
       - name: Test policy planner
         run: python -m pytest -q tests/test_authtrace_pipeline.py
-      - name: Build policy impact plan and evidence artifacts
+      - name: Test control center safety and policy APIs\n        run: python -m pytest -q tests/test_control_center.py\n      - name: Build policy impact plan and evidence artifacts
         run: python authtrace_pipeline.py --fail-on-unmapped
       - name: Upload policy impact report
         if: always()
