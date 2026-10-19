@@ -45,7 +45,7 @@ def rule_index(policy):
         if rule_id in result:
             raise SystemExit(f"Duplicate policy rule id: {rule_id}")
         expected = rule.get("expected")
-        if expected is not None and expected not in {"allow", "deny"}:
+        if expected is not None and (not isinstance(expected, str) or expected not in {"allow", "deny"}):
             raise SystemExit(f"Rule {rule_id}: expected must be 'allow' or 'deny'.")
         result[rule_id] = rule
     return result
