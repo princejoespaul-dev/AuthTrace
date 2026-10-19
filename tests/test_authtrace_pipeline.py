@@ -15,6 +15,7 @@ from authtrace_pipeline import (
     validate_mapping,
     validate_mapping_rule_ids,
     validate_nodeid_paths,
+    validate_policy,
 )
 
 
@@ -135,6 +136,39 @@ class PolicyPipelineTests(unittest.TestCase):
             self.assertNotIn('<script>alert("x")</script>', text)
             self.assertNotIn('<img src=x onerror=alert(1)>', text)
             self.assertIn(html.escape('<img src=x onerror=alert(1)>'), text)
+
+    def test_strict_policy_validation_requires_all_authorization_fields(self):
+        valid = {
+            "policy_version": "1", "description": "test",
+            "rules": [{"id": "A", "actor": "user", "action": "read_invoice",
+                       "resource": "invoice", "condition": "invoice.owner_id == actor.user_id",
+                       "expected": "allow"}],
+            "scope": {"base_url": "http://127.0.0.1:8000",
+                      "allowed_hosts": ["127.0.0.1", "localhost"], "default_methods": ["GET"]},
+        }
+        self.assertEqual(validate_policy(valid), valid)
+        for invalid in (
+            {},
+            {**valid, "rules": [{**valid["rules"][0], "expected": "maybe"}]},
+            {**valid, "rules": [{k: v for k, v in valid["rules"][0].items() if k != "expected"}]},
+            {**valid, "rules": [{**valid["rules"][0], "actor": ["user"]}]},
+            {**valid, "rules": [{**valid["rules"][0], "condition": "arbitrary code"}]},
+            {**valid, "rules": [valid["rules"][0], valid["rules"][0]]},
+            {**valid, "unsupported": True},
+        ):
+            with self.subTest(policy=invalid), self.assertRaises(SystemExit):
+                validate_policy(invalid)
+
+    def test_mapping_rejects_unsupported_fields_and_duplicate_node_ids(self):
+        for mapping in (
+            {"mappings": [{"policy_rule_ids": ["A"], "test_nodeids": ["tests/test_a.py::test_a"],
+                           "unexpected": "value"}]},
+            {"mappings": [{"policy_rule_ids": ["A", "A"], "test_nodeids": ["tests/test_a.py::test_a"]}]},
+            {"mappings": [{"policy_rule_ids": ["A"], "test_nodeids": [
+                "tests/test_a.py::test_a", "tests/test_a.py::test_a"]}]},
+        ):
+            with self.subTest(mapping=mapping), self.assertRaises(SystemExit):
+                validate_mapping(mapping)
 
     def test_mapping_rejects_unknown_policy_rule_ids(self):
         mapping = {"mappings": [
