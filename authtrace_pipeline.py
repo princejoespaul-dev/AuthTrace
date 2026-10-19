@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import html
+import hashlib
 import json
 import os
 import subprocess
@@ -77,6 +78,19 @@ def validate_mapping(mapping_doc):
                 raise SystemExit(f"Duplicate mapping for policy rule {rule_id}.")
             seen_pairs.add(pair)
     return mappings
+
+
+def validate_mapping_rule_ids(mapping_doc, known_rule_ids):
+    """Reject mappings that refer to policy rules absent from both policy versions."""
+    known = set(known_rule_ids)
+    unknown = sorted({
+        rule_id
+        for entry in validate_mapping(mapping_doc)
+        for rule_id in entry["policy_rule_ids"]
+        if rule_id not in known
+    })
+    if unknown:
+        raise SystemExit("Test mapping references unknown policy rule ID(s): " + ", ".join(unknown))
 
 
 def validate_nodeid_paths(mapping_doc, root=Path.cwd()):
@@ -250,16 +264,17 @@ def run_selected(plan, base_url):
             )
             output = proc.stdout or ""
             duration = round(time.monotonic() - started, 3)
-            print(output, end="" if output.endswith("\n") else "\n")
-            missing = "not found:" in output or "no tests ran" in output.lower()
+            # Do not echo arbitrary pytest output: it may contain sensitive test data.
+            missing = "not found:" in output.lower() or "no tests ran" in output.lower()
             status = "ERROR" if missing or proc.returncode not in (0, 1) else ("PASS" if proc.returncode == 0 else "FAIL")
             rc = proc.returncode
         except subprocess.TimeoutExpired:
             duration, status, rc = round(time.monotonic() - started, 3), "ERROR", 124
-            output = "Selected pytest node timed out."
-            print(output)
+        except OSError:
+            duration, status, rc = round(time.monotonic() - started, 3), "ERROR", 2
         statuses.append(status)
         overall_rc = max(overall_rc, rc if rc else (2 if status == "ERROR" else 0))
+        print(f"{nodeid}: {status} ({duration:.3f}s)")
         results.append({
             "test_nodeids": [nodeid], "verdict": status, "return_code": rc,
             "duration_seconds": duration, "response_bodies_recorded": False,
@@ -285,6 +300,10 @@ def main(argv=None):
     new_policy = load_json(args.new_policy)
     mapping_doc = load_json(args.mapping)
     changes = diff_policies(old_policy, new_policy)
+    validate_mapping_rule_ids(
+        mapping_doc,
+        set(rule_index(old_policy)) | set(rule_index(new_policy)),
+    )
     plan = build_plan(changes, mapping_doc)
     missing_test_files = validate_nodeid_paths(mapping_doc)
 
@@ -309,8 +328,21 @@ def main(argv=None):
         "tool": "AuthTrace policy pipeline",
         "run_id": datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ"),
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "policy_versions": {"old": old_policy.get("policy_version", "unknown"),
-                            "new": new_policy.get("policy_version", "unknown")},
+        "tool_version": "1.1.0",
+        "policy_versions": {
+            "old": old_policy.get("policy_version", "unknown"),
+            "new": new_policy.get("policy_version", "unknown"),
+            "old_sha256": hashlib.sha256(
+                json.dumps(old_policy, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            ).hexdigest(),
+            "new_sha256": hashlib.sha256(
+                json.dumps(new_policy, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            ).hexdigest(),
+        },
+        "target": {
+            "url": safe_target(args.base_url) if args.execute else None,
+            "execution_requested": args.execute,
+        },
         "summary": {"changed_rules": len(changes), "selected_tests": len(plan["selected_tests"]),
                     "unmapped_rules": len(plan["unmapped_rules"]), "missing_test_files": len(missing_test_files),
                     "tests_executed": len(checks),
