@@ -157,6 +157,24 @@ class PolicyPipelineTests(unittest.TestCase):
         ]}
         self.assertEqual(build_plan(changes, mapping), build_plan(changes, mapping))
 
+    def test_policy_rejects_invalid_rule_field_types(self):
+        invalid_policies = [
+            {"rules": [{"id": "A", "actor": ["user"]}]},
+            {"rules": [{"id": "A", "condition": ""}]},
+            {"rules": [{"id": "A", "expected": True}]},
+        ]
+        for policy in invalid_policies:
+            with self.subTest(policy=policy), self.assertRaises(SystemExit):
+                diff_policies(policy, {"rules": []})
+
+    def test_target_url_rejects_query_and_fragment(self):
+        for target in (
+            "http://127.0.0.1:8000/?token=secret",
+            "http://127.0.0.1:8000/#private",
+        ):
+            with self.subTest(target=target), self.assertRaises(SystemExit):
+                safe_target(target)
+
 
 if __name__ == "__main__":
     unittest.main()
