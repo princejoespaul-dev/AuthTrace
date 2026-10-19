@@ -96,10 +96,10 @@ Set `AUTH_TRACE_EXPECT_VULNERABLE=1` for vulnerable mode. The runner uses a loca
 
 ## 5. Local RAG
 
-Install the optional retrieval dependencies (already listed in requirements):
+Install the optional retrieval dependencies:
 
 ```bash
-pip install sentence-transformers
+pip install -r requirements-rag.txt
 python rag_assistant.py --question "Why is cross-user invoice access a BOLA risk?"
 ```
 
