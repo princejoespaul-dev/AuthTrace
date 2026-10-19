@@ -12,7 +12,7 @@ This is a student-project starter, not a production security scanner. It demonst
 - The test runner refuses non-loopback hosts unless `AUTHTRACE_ALLOW_STAGING=1` is set.
 - Use only systems you own or have explicit written authorization to test.
 - Use synthetic fixtures; do not put tokens or private response bodies in reports.
-- Only GET/read tests are included. Add write tests only against a disposable database with explicit approval.
+- The current authorization demo and seeded checks are read-only; write/tenant-isolation coverage is not yet implemented.
 - `PASS`, `FAIL`, and `INCONCLUSIVE` describe the declared policy/test, not whether an entire API is secure.
 
 ## 1. Setup
@@ -27,6 +27,12 @@ python -m venv .venv
 source .venv/bin/activate
 
 pip install -r requirements.txt
+```
+
+The core install contains the API, HTTP client, and test runner only. Optional local RAG dependencies are separate:
+
+```bash
+pip install -r requirements-rag.txt
 ```
 
 ## 2. Start the demo API
@@ -124,7 +130,17 @@ knowledge_base/         Curated source notes
 reports/                Generated reports
 ```
 
-## 7. Suggested implementation milestones
+## 7. Policy-change pipeline
+
+See [`README_POLICY_PIPELINE.md`](README_POLICY_PIPELINE.md) for policy diffing, deterministic risk-ranked test selection, mapping validation, report generation, and CI behavior. The pipeline validates that mapped rule IDs exist in at least one of the compared policy versions and records stable SHA-256 policy hashes. Planned checks are not the same as executed checks.
+
+## 8. Known limitations
+
+- The demo currently covers invoice reads; write authorization, denied-write integrity, tenant isolation, and a full vulnerable/fixed/regression automation are not implemented yet.
+- A green planner test run validates policy-diff mechanics, not the security of a running API.
+- JSON evidence includes run timestamps and run IDs, so byte-for-byte report output is not identical across runs; policy hashes and test selection are stable for identical inputs.
+
+## 9. Suggested implementation milestones
 1. Run fixed mode and confirm own-object access passes and cross-user access is denied.
 2. Run vulnerable mode and confirm the cross-user check detects the seeded issue.
 3. Add negative controls (admin allowed; User A own invoice allowed).
