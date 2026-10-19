@@ -202,6 +202,9 @@ def start_run(request: RunRequest):
         raise HTTPException(422, "No tests were selected because the policies have no mapped changes.")
     run_id, started_at = str(uuid.uuid4()), now()
     with connect_db() as conn:
+        active = conn.execute("SELECT id FROM runs WHERE status='RUNNING' LIMIT 1").fetchone()
+        if active:
+            raise HTTPException(409, f"Run {active['id']} is already active.")
         conn.execute("INSERT INTO runs(id,status,target,started_at) VALUES(?,?,?,?)",
                      (run_id, "RUNNING", target, started_at))
     started = time.monotonic()
@@ -256,8 +259,8 @@ def policy_diff():
     changes = module.diff_policies(old, new)
     return {"old_version": old.get("policy_version", "unknown"),
             "new_version": new.get("policy_version", "unknown"),
-            "old_sha256": hashlib.sha256(json.dumps(old, sort_keys=True).encode()).hexdigest(),
-            "new_sha256": hashlib.sha256(json.dumps(new, sort_keys=True).encode()).hexdigest(),
+            "old_sha256": hashlib.sha256(json.dumps(old, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
+            "new_sha256": hashlib.sha256(json.dumps(new, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
             "changes": [{"rule_id": c["rule_id"], "change": c["change"],
                          "changed_fields": c.get("changed_fields", []),
                          "before": c.get("before"), "after": c.get("after"),
