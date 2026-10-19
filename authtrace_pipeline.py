@@ -476,11 +476,14 @@ def main(argv=None):
                     "unmapped_rules": len(plan["unmapped_rules"]), "missing_test_files": len(missing_test_files),
                     "tests_executed": len(checks),
                     "passed": sum(x["verdict"] == "PASS" for x in checks),
-                    "failed": sum(x["verdict"] == "FAIL" for x in checks),
-                    "errored": sum(x["verdict"] == "ERROR" for x in checks)},
+                    "failed": sum(x["verdict"] in {"FAIL", "POLICY_MISMATCH", "SECURITY_REGRESSION"} for x in checks),
+                    "errored": sum(x["verdict"] == "ERROR" for x in checks),
+                    "timed_out": sum(x["verdict"] == "TIMEOUT" for x in checks)},
         "changes": [{"rule_id": c["rule_id"], "change": c["change"],
-                     "changed_fields": c.get("changed_fields", []), "risk_score": risk_score(c),
-                     "risk_explanation": risk_explanation(c)} for c in changes],
+                     "changed_fields": c.get("changed_fields", []),
+                     "before": c.get("before"), "after": c.get("after"),
+                     "risk_score": risk_score(c), "risk_explanation": risk_explanation(c)}
+                    for c in changes],
         "plan": plan, "checks": checks,
         "coverage_gaps": {"unmapped_rules": plan["unmapped_rules"], "missing_test_nodeids": missing_test_files},
         "execution_status": ("NOT_REQUESTED" if not args.execute else
