@@ -246,6 +246,57 @@ def start_run(request: RunRequest):
     return run_row(row)
 
 
+class PolicySubmission(BaseModel):
+    policy: dict
+
+
+@app.get("/api/policies")
+def get_policies():
+    """Return the immutable baseline and current submitted proposal."""
+    module = pipeline_module()
+    baseline = read_json(ROOT / "policy.json")
+    proposal_path = PROPOSAL_PATH if PROPOSAL_PATH.exists() else ROOT / "policy.v2.json"
+    proposal = read_json(proposal_path)
+    try:
+        module.validate_policy(baseline)
+        module.validate_policy(proposal)
+    except SystemExit as exc:
+        raise HTTPException(422, str(exc)) from exc
+    def digest(value):
+        return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    return {"baseline": baseline, "proposal": proposal,
+            "baseline_sha256": digest(baseline), "proposal_sha256": digest(proposal),
+            "proposal_source": proposal_path.name}
+
+
+@app.post("/api/policies/validate")
+def validate_submitted_policy(request: PolicySubmission):
+    module = pipeline_module()
+    try:
+        module.validate_policy(request.policy)
+    except SystemExit as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return {"valid": True, "policy_version": request.policy["policy_version"],
+            "rule_count": len(request.policy["rules"])}
+
+
+@app.post("/api/policies/submit")
+def submit_policy(request: PolicySubmission):
+    """Validate first, then atomically save a proposal without mutating the baseline."""
+    module = pipeline_module()
+    try:
+        module.validate_policy(request.policy)
+    except SystemExit as exc:
+        raise HTTPException(422, str(exc)) from exc
+    payload = json.dumps(request.policy, indent=2, ensure_ascii=False) + "\n"
+    temp_path = PROPOSAL_PATH.with_suffix(".json.tmp")
+    temp_path.write_text(payload, encoding="utf-8")
+    temp_path.replace(PROPOSAL_PATH)
+    digest = hashlib.sha256(json.dumps(request.policy, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    return {"saved": True, "proposal_sha256": digest, "proposal_path": PROPOSAL_PATH.name,
+            "policy_version": request.policy["policy_version"]}
+
+
 @app.get("/api/policy-diff")
 def policy_diff():
     module = pipeline_module()
