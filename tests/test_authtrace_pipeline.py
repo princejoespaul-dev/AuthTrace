@@ -13,6 +13,7 @@ from authtrace_pipeline import (
     run_selected,
     safe_target,
     validate_mapping,
+    validate_mapping_rule_ids,
     validate_nodeid_paths,
 )
 
@@ -134,6 +135,27 @@ class PolicyPipelineTests(unittest.TestCase):
             self.assertNotIn('<script>alert("x")</script>', text)
             self.assertNotIn('<img src=x onerror=alert(1)>', text)
             self.assertIn(html.escape('<img src=x onerror=alert(1)>'), text)
+
+    def test_mapping_rejects_unknown_policy_rule_ids(self):
+        mapping = {"mappings": [
+            {"policy_rule_ids": ["UNKNOWN"], "test_nodeids": ["tests/test_x.py::test_x"]}
+        ]}
+        with self.assertRaisesRegex(SystemExit, "unknown policy rule"):
+            validate_mapping_rule_ids(mapping, {"A", "B"})
+
+    def test_mapping_accepts_rules_present_in_either_policy_version(self):
+        mapping = {"mappings": [
+            {"policy_rule_ids": ["A", "REMOVED"], "test_nodeids": ["tests/test_x.py::test_x"]}
+        ]}
+        validate_mapping_rule_ids(mapping, {"A", "REMOVED", "ADDED"})
+
+    def test_plan_is_reproducible_for_identical_inputs(self):
+        changes = diff_policies(self.old, self.new)
+        mapping = {"mappings": [
+            {"policy_rule_ids": ["A"], "test_nodeids": ["tests/test_a.py::test_a"]},
+            {"policy_rule_ids": ["B"], "test_nodeids": ["tests/test_b.py::test_b"]},
+        ]}
+        self.assertEqual(build_plan(changes, mapping), build_plan(changes, mapping))
 
 
 if __name__ == "__main__":
