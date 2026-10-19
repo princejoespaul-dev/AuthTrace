@@ -74,7 +74,7 @@ def risk_score(change):
         score += 2
     if "expected" in fields:
         if before.get("expected") == "deny" and after.get("expected") == "allow":
-            score += 5
+            score += 6
         else:
             score += 2
     if fields & {"condition", "actor", "action", "resource"}:
@@ -137,7 +137,7 @@ def safe_target(base_url):
 
 def render_dashboard(report, output_path):
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    checks = report.get("checks", [])
+    checks = report.get("checks", []) or [dict(item, verdict="PLANNED") for item in report.get("plan", {}).get("items", [])]
     rows = []
     for item in checks:
         rows.append(
@@ -187,7 +187,7 @@ def run_selected(plan, base_url):
         )
         duration = round(time.monotonic() - started, 3)
         # Console output is shown to the operator, but not persisted to the report.
-        print(proc.stdout, end="" if proc.stdout.endswith("\\n") else "\\n")
+        print(proc.stdout, end="" if proc.stdout.endswith("\n") else "\n")
         passed = proc.returncode == 0
         overall_rc = max(overall_rc, proc.returncode)
         results.append({
