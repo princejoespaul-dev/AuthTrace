@@ -210,6 +210,9 @@ def start_run(request: RunRequest):
                      (run_id, "RUNNING", target, started_at))
     started = time.monotonic()
     expected = {rule["id"]: rule["expected"] for rule in proposal["rules"]}
+    def digest(value):
+        return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    baseline_hash, proposal_hash = digest(baseline), digest(proposal)
     try:
         checks, rc, overall = module.run_selected(plan, target, expected, timeout_seconds=25)
         duration = round(time.monotonic() - started, 3)
@@ -219,9 +222,6 @@ def start_run(request: RunRequest):
                    "errored": sum(x["verdict"] == "ERROR" for x in checks),
                    "timed_out": sum(x["verdict"] == "TIMEOUT" for x in checks),
                    "coverage_gaps": coverage_gaps}
-        def digest(value):
-            return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-        baseline_hash, proposal_hash = digest(baseline), digest(proposal)
         report = {"run_id": run_id, "generated_at": now(), "overall": overall,
                   "target": target, "baseline_sha256": baseline_hash, "proposal_sha256": proposal_hash,
                   "policy_versions": {"old": baseline["policy_version"], "new": proposal["policy_version"],
@@ -242,9 +242,22 @@ def start_run(request: RunRequest):
         REPORT_DIR.mkdir(parents=True, exist_ok=True)
         (REPORT_DIR / "latest.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     except Exception as exc:
+        failure = {"run_id": run_id, "generated_at": now(), "overall": "ERROR",
+                   "target": target, "baseline_sha256": baseline_hash, "proposal_sha256": proposal_hash,
+                   "policy_versions": {"old": baseline["policy_version"], "new": proposal["policy_version"],
+                                       "old_sha256": baseline_hash, "new_sha256": proposal_hash},
+                   "changed_rules": changes, "selected_tests": plan["selected_tests"],
+                   "selection": plan["items"], "coverage_gaps": coverage_gaps, "checks": [],
+                   "summary": {"checks": 0, "passed": 0, "failed": 0, "errored": 1, "timed_out": 0},
+                   "error_class": "RUNNER_EXCEPTION",
+                   "error": f"Execution failed ({type(exc).__name__})."}
         with connect_db() as conn:
-            conn.execute("UPDATE runs SET status='ERROR',finished_at=?,duration_seconds=?,overall='ERROR',error=? WHERE id=?",
-                         (now(), round(time.monotonic() - started, 3), f"Execution failed ({type(exc).__name__}).", run_id))
+            conn.execute("""UPDATE runs SET status='ERROR',finished_at=?,duration_seconds=?,overall='ERROR',
+                summary_json=?,report_json=?,error=? WHERE id=?""",
+                (now(), round(time.monotonic() - started, 3), json.dumps(failure["summary"]),
+                 json.dumps(failure), failure["error"], run_id))
+        REPORT_DIR.mkdir(parents=True, exist_ok=True)
+        (REPORT_DIR / "latest.json").write_text(json.dumps(failure, indent=2), encoding="utf-8")
     with connect_db() as conn:
         row = conn.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone()
     return run_row(row)
