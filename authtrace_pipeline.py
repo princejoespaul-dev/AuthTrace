@@ -203,8 +203,8 @@ def safe_target(base_url):
         loopback = address.is_loopback
     except ValueError:
         loopback = parsed.hostname.lower() == "localhost"
-    if not loopback and os.getenv("AUTOTRACE_ALLOW_STAGING") != "1":
-        raise SystemExit("Blocked: non-loopback target. For explicitly authorized staging only, set AUTOTRACE_ALLOW_STAGING=1.")
+    if not loopback and os.getenv("AUTHTRACE_ALLOW_STAGING") != "1":
+        raise SystemExit("Blocked: non-loopback target. For explicitly authorized staging only, set AUTHTRACE_ALLOW_STAGING=1.")
     return parsed.geturl().rstrip("/")
 
 
