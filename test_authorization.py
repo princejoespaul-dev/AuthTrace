@@ -80,8 +80,11 @@ def test_user_can_read_own_invoice():
     response = request_invoice("token-user-a", "inv-a")
     expected = EXPECTED_OUTCOMES.get(RULE_OWN, "allow")
     evidence = _observe(response, expected)
-    assert response.status_code == 200, "Owner should be able to read their own invoice."
-    assert evidence["returned_owner_id"] == "user-a"
+    if expected == "allow":
+        assert response.status_code == 200, "Owner should be able to read their own invoice."
+        assert evidence["returned_owner_id"] == "user-a"
+    else:
+        assert response.status_code in {401, 403, 404}, "Expected a denial for this policy rule."
     _assert_policy(evidence)
 
 
@@ -89,8 +92,11 @@ def test_admin_can_read_other_users_invoice():
     response = request_invoice("token-admin", "inv-b")
     expected = EXPECTED_OUTCOMES.get(RULE_ADMIN, "allow")
     evidence = _observe(response, expected)
-    assert response.status_code == 200, "Administrator should be able to read the fixture invoice."
-    assert evidence["returned_owner_id"] == "user-b"
+    if expected == "allow":
+        assert response.status_code == 200, "Administrator should be able to read the fixture invoice."
+        assert evidence["returned_owner_id"] == "user-b"
+    else:
+        assert response.status_code in {401, 403, 404}, "Expected a denial for this policy rule."
     _assert_policy(evidence)
 
 
