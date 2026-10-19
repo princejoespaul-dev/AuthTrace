@@ -65,15 +65,15 @@ def validate_policy(policy):
                 raise SystemExit(f"Rule at index {i}: missing required field '{field}'.")
         if not isinstance(rule["id"], str) or not rule["id"].strip():
             raise SystemExit(f"Rule at index {i}: 'id' must be a non-empty string.")
-        if rule["actor"] not in valid_actors:
+        if not isinstance(rule["actor"], str) or rule["actor"] not in valid_actors:
             raise SystemExit(f"Rule {rule['id']}: actor must be one of {sorted(valid_actors)}.")
-        if rule["action"] not in valid_actions:
+        if not isinstance(rule["action"], str) or rule["action"] not in valid_actions:
             raise SystemExit(f"Rule {rule['id']}: action must be one of {sorted(valid_actions)}.")
-        if rule["resource"] not in valid_resources:
+        if not isinstance(rule["resource"], str) or rule["resource"] not in valid_resources:
             raise SystemExit(f"Rule {rule['id']}: resource must be one of {sorted(valid_resources)}.")
-        if rule["condition"] not in valid_conditions:
+        if not isinstance(rule["condition"], str) or rule["condition"] not in valid_conditions:
             raise SystemExit(f"Rule {rule['id']}: unsupported condition.")
-        if rule["expected"] not in {"allow", "deny"}:
+        if not isinstance(rule["expected"], str) or rule["expected"] not in {"allow", "deny"}:
             raise SystemExit(f"Rule {rule['id']}: expected must be 'allow' or 'deny'.")
     rule_index(policy)
     scope = policy.get("scope")
@@ -370,8 +370,12 @@ def run_selected(plan, base_url, expected_outcomes=None, timeout_seconds=30):
         statuses.append(status)
         overall_rc = max(overall_rc, rc if rc else (2 if status in {"ERROR", "TIMEOUT"} else 0))
         print(f"{nodeid}: {status} ({duration:.3f}s)")
+        associated = [item for item in plan.get("items", []) if nodeid in item.get("test_nodeids", [])]
         results.append({
-            "test_nodeids": [nodeid], "verdict": status, "return_code": rc,
+            "test_nodeids": [nodeid], "rule_ids": sorted({item["rule_id"] for item in associated}),
+            "expected_outcomes": {item["rule_id"]: (expected_outcomes or {}).get(item["rule_id"])
+                                  for item in associated},
+            "verdict": status, "return_code": rc,
             "duration_seconds": duration, "error_class": error_class,
             "evidence": evidence, "failure_details": failure,
             "response_bodies_recorded": False, "credentials_recorded": False,
