@@ -10,6 +10,7 @@ from authtrace_pipeline import (
     diff_policies,
     render_dashboard,
     risk_score,
+    run_selected,
     safe_target,
     validate_mapping,
     validate_nodeid_paths,
@@ -110,6 +111,12 @@ class PolicyPipelineTests(unittest.TestCase):
 
     def test_target_safety_allows_loopback(self):
         self.assertEqual(safe_target("http://127.0.0.1:8000/"), "http://127.0.0.1:8000")
+
+    def test_empty_execution_selection_is_error_not_pass(self):
+        results, return_code, overall = run_selected({"selected_tests": []}, "http://127.0.0.1:8000")
+        self.assertEqual(results, [])
+        self.assertNotEqual(return_code, 0)
+        self.assertEqual(overall, "ERROR")
 
     def test_dashboard_escapes_untrusted_values(self):
         with tempfile.TemporaryDirectory() as tmp:
