@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 
 DEFAULT_POLICY = Path("policy.json")
 DEFAULT_POLICY_V2 = Path("policy.v2.json")
+DEFAULT_POLICY_PROPOSAL = Path("policy.proposed.json")
 DEFAULT_MAPPING = Path("test_mapping.json")
 DEFAULT_REPORT = Path("reports/latest_pipeline.json")
 DEFAULT_DASHBOARD = Path("reports/dashboard.html")
@@ -28,6 +29,66 @@ def load_json(path: Path):
     except json.JSONDecodeError as exc:
         raise SystemExit(f"Invalid JSON in {path}: {exc}") from exc
     return value
+
+
+def validate_policy(policy):
+    """Validate the supported AuthTrace policy schema before planning or execution."""
+    if not isinstance(policy, dict) or not policy:
+        raise SystemExit("Policy must be a non-empty JSON object.")
+    allowed_top = {"policy_version", "description", "rules", "scope"}
+    extra = sorted(set(policy) - allowed_top)
+    if extra:
+        raise SystemExit("Unsupported policy field(s): " + ", ".join(extra))
+    if not isinstance(policy.get("policy_version"), str) or not policy["policy_version"].strip():
+        raise SystemExit("Policy requires a non-empty string 'policy_version'.")
+    if "description" in policy and not isinstance(policy["description"], str):
+        raise SystemExit("Policy 'description' must be a string.")
+    rules = policy.get("rules")
+    if not isinstance(rules, list) or not rules:
+        raise SystemExit("Policy must contain a non-empty 'rules' array.")
+    allowed_rule = {"id", "actor", "action", "resource", "condition", "expected"}
+    valid_actors = {"user", "admin"}
+    valid_actions = {"read_invoice"}
+    valid_resources = {"invoice"}
+    valid_conditions = {
+        "invoice.owner_id == actor.user_id",
+        "invoice.owner_id != actor.user_id",
+        "actor.role == admin",
+    }
+    for i, rule in enumerate(rules):
+        if not isinstance(rule, dict):
+            raise SystemExit(f"Policy rule at index {i} must be an object.")
+        extra_fields = sorted(set(rule) - allowed_rule)
+        if extra_fields:
+            raise SystemExit(f"Rule at index {i}: unsupported field(s): " + ", ".join(extra_fields))
+        for field in ("id", "actor", "action", "resource", "condition", "expected"):
+            if field not in rule:
+                raise SystemExit(f"Rule at index {i}: missing required field '{field}'.")
+        if not isinstance(rule["id"], str) or not rule["id"].strip():
+            raise SystemExit(f"Rule at index {i}: 'id' must be a non-empty string.")
+        if not isinstance(rule["actor"], str) or rule["actor"] not in valid_actors:
+            raise SystemExit(f"Rule {rule['id']}: actor must be one of {sorted(valid_actors)}.")
+        if not isinstance(rule["action"], str) or rule["action"] not in valid_actions:
+            raise SystemExit(f"Rule {rule['id']}: action must be one of {sorted(valid_actions)}.")
+        if not isinstance(rule["resource"], str) or rule["resource"] not in valid_resources:
+            raise SystemExit(f"Rule {rule['id']}: resource must be one of {sorted(valid_resources)}.")
+        if not isinstance(rule["condition"], str) or rule["condition"] not in valid_conditions:
+            raise SystemExit(f"Rule {rule['id']}: unsupported condition.")
+        if not isinstance(rule["expected"], str) or rule["expected"] not in {"allow", "deny"}:
+            raise SystemExit(f"Rule {rule['id']}: expected must be 'allow' or 'deny'.")
+    rule_index(policy)
+    scope = policy.get("scope")
+    if not isinstance(scope, dict):
+        raise SystemExit("Policy requires a 'scope' object.")
+    if set(scope) - {"base_url", "allowed_hosts", "default_methods"}:
+        raise SystemExit("Policy scope contains unsupported fields.")
+    if scope.get("base_url") != "http://127.0.0.1:8000":
+        raise SystemExit("Policy scope base_url must be http://127.0.0.1:8000.")
+    if scope.get("allowed_hosts") != ["127.0.0.1", "localhost"]:
+        raise SystemExit("Policy scope allowed_hosts must be ['127.0.0.1', 'localhost'].")
+    if scope.get("default_methods") != ["GET"]:
+        raise SystemExit("Policy scope default_methods must be ['GET'].")
+    return policy
 
 
 def rule_index(policy):
@@ -59,8 +120,16 @@ def rule_index(policy):
 
 
 def validate_mapping(mapping_doc):
+    """Validate the supported mapping schema without silently dropping entries."""
     if not isinstance(mapping_doc, dict):
         raise SystemExit("Test mapping must be a JSON object.")
+    extra = sorted(set(mapping_doc) - {"schema_version", "description", "mappings"})
+    if extra:
+        raise SystemExit("Unsupported test mapping field(s): " + ", ".join(extra))
+    if "schema_version" in mapping_doc and (not isinstance(mapping_doc["schema_version"], str) or not mapping_doc["schema_version"].strip()):
+        raise SystemExit("Test mapping schema_version must be a non-empty string.")
+    if "description" in mapping_doc and not isinstance(mapping_doc["description"], str):
+        raise SystemExit("Test mapping description must be a string.")
     mappings = mapping_doc.get("mappings")
     if not isinstance(mappings, list):
         raise SystemExit("Test mapping must contain a 'mappings' array.")
@@ -68,23 +137,30 @@ def validate_mapping(mapping_doc):
     for index, entry in enumerate(mappings):
         if not isinstance(entry, dict):
             raise SystemExit(f"Mapping at index {index} must be an object.")
+        extra_fields = sorted(set(entry) - {"policy_rule_ids", "test_nodeids", "test_area", "rationale"})
+        if extra_fields:
+            raise SystemExit(f"Mapping at index {index}: unsupported field(s): " + ", ".join(extra_fields))
         rule_ids = entry.get("policy_rule_ids")
         nodeids = entry.get("test_nodeids")
         if not isinstance(rule_ids, list) or not rule_ids:
             raise SystemExit(f"Mapping at index {index} must have non-empty policy_rule_ids.")
-        if any(not isinstance(x, str) or not x.strip() for x in rule_ids):
-            raise SystemExit(f"Mapping at index {index} contains an invalid policy rule ID.")
+        if any(not isinstance(x, str) or not x.strip() for x in rule_ids) or len(set(rule_ids)) != len(rule_ids):
+            raise SystemExit(f"Mapping at index {index} contains an invalid or duplicate policy rule ID.")
         if not isinstance(nodeids, list) or not nodeids:
             raise SystemExit(f"Mapping at index {index} must have non-empty test_nodeids.")
-        if any(not isinstance(x, str) or not x.strip() or "::" not in x for x in nodeids):
+        if any(not isinstance(x, str) or not x.strip() or "::" not in x or x.startswith("-") for x in nodeids):
             raise SystemExit(f"Mapping at index {index} contains an invalid pytest node ID.")
+        if len(set(nodeids)) != len(nodeids):
+            raise SystemExit(f"Mapping at index {index} contains duplicate pytest node IDs.")
+        for field in ("test_area", "rationale"):
+            if field in entry and not isinstance(entry[field], str):
+                raise SystemExit(f"Mapping at index {index}: {field} must be a string.")
         for rule_id in rule_ids:
             pair = (rule_id, tuple(nodeids))
             if pair in seen_pairs:
                 raise SystemExit(f"Duplicate mapping for policy rule {rule_id}.")
             seen_pairs.add(pair)
     return mappings
-
 
 def validate_mapping_rule_ids(mapping_doc, known_rule_ids):
     """Reject mappings that refer to policy rules absent from both policy versions."""
@@ -253,49 +329,94 @@ th{background:#f4f6f8}.note{margin-top:1.5rem;padding:1rem;background:#f7f8fa}
     return output_path
 
 
-def run_selected(plan, base_url):
+def run_selected(plan, base_url, expected_outcomes=None, timeout_seconds=30):
+    """Run only validated selected pytest node IDs and retain sanitized evidence."""
     safe_target(base_url)
     if not plan["selected_tests"]:
         return [], 2, "ERROR"
     env = os.environ.copy()
     env["AUTH_TRACE_BASE_URL"] = base_url
-    results = []
-    overall_rc = 0
-    statuses = []
+    env["AUTH_TRACE_EXPECTED_OUTCOMES"] = json.dumps(expected_outcomes or {})
+    results, overall_rc, statuses = [], 0, []
     for nodeid in plan["selected_tests"]:
         started = time.monotonic()
+        evidence = None
+        output = ""
         try:
             proc = subprocess.run(
-                [sys.executable, "-m", "pytest", "-q", nodeid],
+                [sys.executable, "-m", "pytest", "-q", "-s", nodeid],
                 env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                check=False, timeout=120,
+                check=False, timeout=timeout_seconds, shell=False,
             )
             output = proc.stdout or ""
             duration = round(time.monotonic() - started, 3)
-            # Do not echo arbitrary pytest output: it may contain sensitive test data.
-            missing = "not found:" in output.lower() or "no tests ran" in output.lower()
-            status = "ERROR" if missing or proc.returncode not in (0, 1) else ("PASS" if proc.returncode == 0 else "FAIL")
+            for line in output.splitlines():
+                if line.startswith("AUTHTRACE_EVIDENCE="):
+                    try:
+                        evidence = json.loads(line.split("=", 1)[1])
+                    except json.JSONDecodeError:
+                        evidence = {"error": "Malformed structured test evidence"}
+            lower = output.lower()
+            collection_error = any(x in lower for x in (
+                "error collecting", "no tests ran", "not found:", "importerror", "modulenotfounderror",
+            ))
+            connection_error = any(x in lower for x in (
+                "connecterror", "connecttimeout", "readtimeout", "connection refused",
+                "remoteprotocolerror", "network is unreachable",
+            ))
+            if collection_error or proc.returncode not in (0, 1):
+                status, error_class = "ERROR", "COLLECTION_OR_RUNNER_ERROR"
+            elif connection_error:
+                status, error_class = "ERROR", "API_CONNECTION_ERROR"
+            elif evidence and evidence.get("classification") == "SECURITY_REGRESSION":
+                status, error_class = "SECURITY_REGRESSION", "AUTHORIZATION_INVARIANT_VIOLATION"
+            elif evidence and evidence.get("classification") == "MALFORMED_RESPONSE":
+                status, error_class = "ERROR", "MALFORMED_API_RESPONSE"
+            elif evidence and evidence.get("classification") == "API_ERROR":
+                status, error_class = "ERROR", "API_RESPONSE_ERROR"
+            elif proc.returncode == 0:
+                status, error_class = "PASS", None
+            elif evidence and evidence.get("classification") == "POLICY_MISMATCH":
+                status, error_class = "POLICY_MISMATCH", "OBSERVED_BEHAVIOR_DIFFERS_FROM_POLICY"
+            else:
+                status, error_class = "FAIL", "ASSERTION_FAILURE"
             rc = proc.returncode
+            # Keep diagnostics bounded and omit headers/tokens and arbitrary response bodies.
+            safe_output = "\n".join(line for line in output.splitlines()
+                if not any(secret in line.lower() for secret in ("authorization:", "bearer ", "token-user-")))
+            failure_lines = [line.strip() for line in safe_output.splitlines()
+                             if "assert" in line.lower() or "error" in line.lower() or "failed" in line.lower()]
+            failure = " | ".join(failure_lines[-4:])[:1200] or None
         except subprocess.TimeoutExpired:
-            duration, status, rc = round(time.monotonic() - started, 3), "ERROR", 124
-        except OSError:
-            duration, status, rc = round(time.monotonic() - started, 3), "ERROR", 2
+            duration, status, rc, error_class = round(time.monotonic() - started, 3), "TIMEOUT", 124, "TEST_TIMEOUT"
+            failure = "Selected test exceeded the execution timeout."
+        except OSError as exc:
+            duration, status, rc, error_class = round(time.monotonic() - started, 3), "ERROR", 2, "RUNNER_START_ERROR"
+            failure = f"Could not start pytest ({type(exc).__name__})."
         statuses.append(status)
-        overall_rc = max(overall_rc, rc if rc else (2 if status == "ERROR" else 0))
+        overall_rc = max(overall_rc, rc if rc else (2 if status in {"ERROR", "TIMEOUT"} else 0))
         print(f"{nodeid}: {status} ({duration:.3f}s)")
+        associated = [item for item in plan.get("items", []) if nodeid in item.get("test_nodeids", [])]
         results.append({
-            "test_nodeids": [nodeid], "verdict": status, "return_code": rc,
-            "duration_seconds": duration, "response_bodies_recorded": False,
-            "credentials_recorded": False,
+            "test_nodeids": [nodeid], "rule_ids": sorted({item["rule_id"] for item in associated}),
+            "expected_outcomes": {item["rule_id"]: (expected_outcomes or {}).get(item["rule_id"])
+                                  for item in associated},
+            "verdict": status, "return_code": rc,
+            "duration_seconds": duration, "error_class": error_class,
+            "evidence": evidence, "failure_details": failure,
+            "response_bodies_recorded": False, "credentials_recorded": False,
         })
-    overall = "ERROR" if "ERROR" in statuses else "FAIL" if "FAIL" in statuses else "PASS"
+    overall = ("ERROR" if "ERROR" in statuses else "TIMEOUT" if "TIMEOUT" in statuses else
+               "SECURITY_REGRESSION" if "SECURITY_REGRESSION" in statuses else
+               "POLICY_MISMATCH" if "POLICY_MISMATCH" in statuses else
+               "FAIL" if "FAIL" in statuses else "PASS")
     return results, overall_rc, overall
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Diff policies, select risk-ranked tests, execute them, and create evidence.")
     parser.add_argument("--old-policy", type=Path, default=DEFAULT_POLICY)
-    parser.add_argument("--new-policy", type=Path, default=DEFAULT_POLICY_V2)
+    parser.add_argument("--new-policy", type=Path, default=(DEFAULT_POLICY_PROPOSAL if DEFAULT_POLICY_PROPOSAL.exists() else DEFAULT_POLICY_V2))
     parser.add_argument("--mapping", type=Path, default=DEFAULT_MAPPING)
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT)
     parser.add_argument("--dashboard", type=Path, default=DEFAULT_DASHBOARD)
@@ -304,8 +425,8 @@ def main(argv=None):
     parser.add_argument("--fail-on-unmapped", action="store_true", help="Return non-zero when changed rules have no test mapping.")
     args = parser.parse_args(argv)
 
-    old_policy = load_json(args.old_policy)
-    new_policy = load_json(args.new_policy)
+    old_policy = validate_policy(load_json(args.old_policy))
+    new_policy = validate_policy(load_json(args.new_policy))
     mapping_doc = load_json(args.mapping)
     changes = diff_policies(old_policy, new_policy)
     validate_mapping_rule_ids(
@@ -319,7 +440,8 @@ def main(argv=None):
     if missing_test_files:
         return_code = 2
     if args.execute and not missing_test_files:
-        checks, return_code, execution_overall = run_selected(plan, args.base_url)
+        expected_outcomes = {rule["id"]: rule["expected"] for rule in new_policy["rules"]}
+        checks, return_code, execution_overall = run_selected(plan, args.base_url, expected_outcomes)
     if args.fail_on_unmapped and plan["unmapped_rules"]:
         return_code = max(return_code, 2)
 
@@ -355,11 +477,14 @@ def main(argv=None):
                     "unmapped_rules": len(plan["unmapped_rules"]), "missing_test_files": len(missing_test_files),
                     "tests_executed": len(checks),
                     "passed": sum(x["verdict"] == "PASS" for x in checks),
-                    "failed": sum(x["verdict"] == "FAIL" for x in checks),
-                    "errored": sum(x["verdict"] == "ERROR" for x in checks)},
+                    "failed": sum(x["verdict"] in {"FAIL", "POLICY_MISMATCH", "SECURITY_REGRESSION"} for x in checks),
+                    "errored": sum(x["verdict"] == "ERROR" for x in checks),
+                    "timed_out": sum(x["verdict"] == "TIMEOUT" for x in checks)},
         "changes": [{"rule_id": c["rule_id"], "change": c["change"],
-                     "changed_fields": c.get("changed_fields", []), "risk_score": risk_score(c),
-                     "risk_explanation": risk_explanation(c)} for c in changes],
+                     "changed_fields": c.get("changed_fields", []),
+                     "before": c.get("before"), "after": c.get("after"),
+                     "risk_score": risk_score(c), "risk_explanation": risk_explanation(c)}
+                    for c in changes],
         "plan": plan, "checks": checks,
         "coverage_gaps": {"unmapped_rules": plan["unmapped_rules"], "missing_test_nodeids": missing_test_files},
         "execution_status": ("NOT_REQUESTED" if not args.execute else

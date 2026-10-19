@@ -48,6 +48,49 @@ class PolicyApiTests(unittest.TestCase):
         self.assertIn("selected_tests", result)
         self.assertIn("unmapped_rules", result)
 
+    def test_policy_validation_endpoint_rejects_missing_expected_outcome(self):
+        policy = control_center.read_json(control_center.ROOT / "policy.json")
+        policy["rules"][0].pop("expected")
+        with self.assertRaises(HTTPException) as caught:
+            control_center.validate_submitted_policy(control_center.PolicySubmission(policy=policy))
+        self.assertEqual(caught.exception.status_code, 422)
+        self.assertIn("expected", caught.exception.detail)
+
+    def test_policy_submission_saves_proposal_without_overwriting_baseline(self):
+        policy = control_center.read_json(control_center.ROOT / "policy.json")
+        baseline_bytes = (control_center.ROOT / "policy.json").read_bytes()
+        with tempfile.TemporaryDirectory() as directory:
+            proposal_path = Path(directory) / "policy.proposed.json"
+            with patch.object(control_center, "PROPOSAL_PATH", proposal_path):
+                result = control_center.submit_policy(control_center.PolicySubmission(policy=policy))
+                self.assertTrue(result["saved"])
+                self.assertEqual(json.loads(proposal_path.read_text(encoding="utf-8")), policy)
+        self.assertEqual((control_center.ROOT / "policy.json").read_bytes(), baseline_bytes)
+
+    def test_run_history_keeps_report_associated_with_its_run(self):
+        module = control_center.pipeline_module()
+        nodeid = "test_authorization.py::test_cross_user_access_matches_declared_mode"
+        evidence = {"expected": "allow", "observed": "deny", "http_status": 404,
+                    "policy_match": False, "security_invariant_violated": False,
+                    "classification": "POLICY_MISMATCH"}
+        checks = [{"test_nodeids": [nodeid], "rule_ids": ["INV-READ-OTHER"],
+                   "verdict": "POLICY_MISMATCH", "duration_seconds": 0.01,
+                   "evidence": evidence, "error_class": "OBSERVED_BEHAVIOR_DIFFERS_FROM_POLICY"}]
+        with tempfile.TemporaryDirectory() as directory:
+            report_dir = Path(directory)
+            db_path = report_dir / "history.db"
+            with patch.object(control_center, "REPORT_DIR", report_dir), \
+                 patch.object(control_center, "DB_PATH", db_path), \
+                 patch.object(module, "run_selected", return_value=(checks, 1, "POLICY_MISMATCH")):
+                control_center.init_db()
+                run = control_center.start_run(control_center.RunRequest(confirm_local_target=True))
+                detail = control_center.get_run(run["id"])
+                self.assertEqual(detail["report"]["run_id"], run["id"])
+                self.assertEqual(detail["report"]["checks"][0]["evidence"], evidence)
+                self.assertEqual(detail["report"]["checks"][0]["rule_ids"], ["INV-READ-OTHER"])
+                self.assertTrue(detail["report"]["baseline_sha256"])
+                self.assertTrue(detail["report"]["proposal_sha256"])
+
     def test_invalid_json_reports_a_readable_error(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "broken.json"

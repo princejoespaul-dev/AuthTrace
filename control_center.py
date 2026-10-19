@@ -26,6 +26,7 @@ ROOT = Path(__file__).resolve().parent
 WEB_DIR = ROOT / "web"
 REPORT_DIR = ROOT / "reports"
 DB_PATH = REPORT_DIR / "authtrace.db"
+PROPOSAL_PATH = ROOT / "policy.proposed.json"
 DEFAULT_TARGET = "http://127.0.0.1:8000"
 app = FastAPI(title="AuthTrace Control Center", version="0.1.0",
               description="Local-first API authorization testing workbench.")
@@ -121,8 +122,8 @@ def overview():
         counts = conn.execute("""SELECT
             COUNT(*) total,
             SUM(CASE WHEN overall IN ('NO_SEEDED_BOLA_OBSERVED','PASS') THEN 1 ELSE 0 END) passed,
-            SUM(CASE WHEN overall IN ('VULNERABILITY_DETECTED','FAIL') THEN 1 ELSE 0 END) failed,
-            SUM(CASE WHEN overall IN ('INCONCLUSIVE','ERROR') THEN 1 ELSE 0 END) inconclusive
+            SUM(CASE WHEN overall IN ('VULNERABILITY_DETECTED','FAIL','SECURITY_REGRESSION','POLICY_MISMATCH') THEN 1 ELSE 0 END) failed,
+            SUM(CASE WHEN overall IN ('INCONCLUSIVE','ERROR','TIMEOUT') THEN 1 ELSE 0 END) inconclusive
             FROM runs""").fetchone()
         open_findings = conn.execute("SELECT COUNT(*) n FROM findings WHERE status='Open'").fetchone()["n"]
     latest = read_json(REPORT_DIR / "latest.json") if (REPORT_DIR / "latest.json").exists() else {}
@@ -177,74 +178,157 @@ def start_run(request: RunRequest):
     target = safe_local_target(request.target)
     if target != DEFAULT_TARGET:
         raise HTTPException(403, "Only the default synthetic demo API at 127.0.0.1:8000 is enabled.")
-    run_id = str(uuid.uuid4())
-    started_at = now()
+    module = pipeline_module()
+    baseline = read_json(ROOT / "policy.json")
+    proposal = read_json(PROPOSAL_PATH if PROPOSAL_PATH.exists() else ROOT / "policy.v2.json")
+    mapping = read_json(ROOT / "test_mapping.json")
+    try:
+        module.validate_policy(baseline)
+        module.validate_policy(proposal)
+        module.validate_mapping_rule_ids(mapping, set(module.rule_index(baseline)) | set(module.rule_index(proposal)))
+    except SystemExit as exc:
+        raise HTTPException(422, str(exc)) from exc
+    changes = module.diff_policies(baseline, proposal)
+    plan = module.build_plan(changes, mapping)
+    missing = module.validate_nodeid_paths(mapping, ROOT)
+    if missing:
+        raise HTTPException(422, "Mapped test files are missing or outside the repository: " + ", ".join(missing))
+    if plan["unmapped_rules"]:
+        # A gap is recorded, not silently treated as successful coverage.
+        coverage_gaps = list(plan["unmapped_rules"])
+    else:
+        coverage_gaps = []
+    if not plan["selected_tests"]:
+        raise HTTPException(422, "No tests were selected because the policies have no mapped changes.")
+    run_id, started_at = str(uuid.uuid4()), now()
     with connect_db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        active = conn.execute("SELECT id FROM runs WHERE status='RUNNING' LIMIT 1").fetchone()
+        if active:
+            raise HTTPException(409, f"Run {active['id']} is already active.")
         conn.execute("INSERT INTO runs(id,status,target,started_at) VALUES(?,?,?,?)",
                      (run_id, "RUNNING", target, started_at))
     started = time.monotonic()
-    env = os.environ.copy()
-    env["AUTH_TRACE_BASE_URL"] = target
-    # Fixed command, no user-controlled shell input; output is parsed and secrets are not stored.
+    expected = {rule["id"]: rule["expected"] for rule in proposal["rules"]}
+    def digest(value):
+        return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    baseline_hash, proposal_hash = digest(baseline), digest(proposal)
     try:
-        proc = subprocess.run([sys.executable, str(ROOT / "run_checks.py")],
-            cwd=ROOT, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            timeout=30, check=False, shell=False)
+        checks, rc, overall = module.run_selected(plan, target, expected, timeout_seconds=25)
         duration = round(time.monotonic() - started, 3)
-        report_path = REPORT_DIR / "latest.json"
-        report = {}
-        if report_path.is_file():
-            try:
-                report = json.loads(report_path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                report = {}
-        if proc.returncode != 0:
-            status = "ERROR"
-            error = "Test runner returned a non-zero exit code. See server logs for diagnostics."
-        elif not report or not isinstance(report.get("checks"), list):
-            status, error = "ERROR", "Test runner completed without a valid evidence report."
-        else:
-            status = "COMPLETED"
-            error = None
-        overall = report.get("overall", "ERROR") if status == "COMPLETED" else "ERROR"
-        summary = {"checks": len(report.get("checks", [])),
-                   "passed": sum(c.get("verdict") == "PASS" for c in report.get("checks", [])),
-                   "failed": sum(c.get("verdict") == "FAIL" for c in report.get("checks", [])),
-                   "inconclusive": sum(c.get("verdict") == "INCONCLUSIVE" for c in report.get("checks", []))}
-        # Report schema is deliberately limited to the sanitized runner's JSON evidence.
-        safe_report = {k: report.get(k) for k in ("tool", "generated_at", "target_mode", "scope_note",
-                       "overall", "checks", "limitations") if k in report}
+        summary = {"checks": len(checks),
+                   "passed": sum(x["verdict"] == "PASS" for x in checks),
+                   "failed": sum(x["verdict"] in {"FAIL", "POLICY_MISMATCH", "SECURITY_REGRESSION"} for x in checks),
+                   "errored": sum(x["verdict"] == "ERROR" for x in checks),
+                   "timed_out": sum(x["verdict"] == "TIMEOUT" for x in checks),
+                   "coverage_gaps": coverage_gaps}
+        report = {"run_id": run_id, "generated_at": now(), "overall": overall,
+                  "target": target, "baseline_sha256": baseline_hash, "proposal_sha256": proposal_hash,
+                  "policy_versions": {"old": baseline["policy_version"], "new": proposal["policy_version"],
+                                      "old_sha256": baseline_hash, "new_sha256": proposal_hash},
+                  "changed_rules": changes, "selected_tests": plan["selected_tests"],
+                  "selection": plan["items"], "coverage_gaps": coverage_gaps,
+                  "checks": checks, "summary": summary,
+                  "limitations": ["A passing selected regression suite does not prove the whole API secure."]}
+        status = "COMPLETED" if overall not in {"ERROR", "TIMEOUT"} else "ERROR"
+        error = None if status == "COMPLETED" else "One or more selected tests could not complete; inspect per-test error classifications."
         with connect_db() as conn:
             conn.execute("""UPDATE runs SET status=?,finished_at=?,duration_seconds=?,overall=?,
                 summary_json=?,report_json=?,error=? WHERE id=?""",
-                (status, now(), duration, overall, json.dumps(summary), json.dumps(safe_report), error, run_id))
-            if overall == "VULNERABILITY_DETECTED":
-                finding_id = "BOLA-CROSS-USER"
+                (status, now(), duration, overall, json.dumps(summary), json.dumps(report), error, run_id))
+            if any(x.get("verdict") == "SECURITY_REGRESSION" for x in checks):
                 conn.execute("INSERT OR IGNORE INTO findings(id,status,updated_at) VALUES(?,?,?)",
-                             (finding_id, "Open", now()))
-    except subprocess.TimeoutExpired:
+                             ("BOLA-CROSS-USER", "Open", now()))
+        REPORT_DIR.mkdir(parents=True, exist_ok=True)
+        (REPORT_DIR / "latest.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+    except Exception as exc:
+        failure = {"run_id": run_id, "generated_at": now(), "overall": "ERROR",
+                   "target": target, "baseline_sha256": baseline_hash, "proposal_sha256": proposal_hash,
+                   "policy_versions": {"old": baseline["policy_version"], "new": proposal["policy_version"],
+                                       "old_sha256": baseline_hash, "new_sha256": proposal_hash},
+                   "changed_rules": changes, "selected_tests": plan["selected_tests"],
+                   "selection": plan["items"], "coverage_gaps": coverage_gaps, "checks": [],
+                   "summary": {"checks": 0, "passed": 0, "failed": 0, "errored": 1, "timed_out": 0},
+                   "error_class": "RUNNER_EXCEPTION",
+                   "error": f"Execution failed ({type(exc).__name__})."}
         with connect_db() as conn:
-            conn.execute("UPDATE runs SET status='ERROR',finished_at=?,duration_seconds=?,overall='ERROR',error=? WHERE id=?",
-                         (now(), round(time.monotonic() - started, 3), "Test execution exceeded the 30-second safety timeout.", run_id))
-    except OSError as exc:
-        with connect_db() as conn:
-            conn.execute("UPDATE runs SET status='ERROR',finished_at=?,overall='ERROR',error=? WHERE id=?",
-                         (now(), f"Could not start test runner: {type(exc).__name__}", run_id))
+            conn.execute("""UPDATE runs SET status='ERROR',finished_at=?,duration_seconds=?,overall='ERROR',
+                summary_json=?,report_json=?,error=? WHERE id=?""",
+                (now(), round(time.monotonic() - started, 3), json.dumps(failure["summary"]),
+                 json.dumps(failure), failure["error"], run_id))
+        REPORT_DIR.mkdir(parents=True, exist_ok=True)
+        (REPORT_DIR / "latest.json").write_text(json.dumps(failure, indent=2), encoding="utf-8")
     with connect_db() as conn:
         row = conn.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone()
     return run_row(row)
+
+
+class PolicySubmission(BaseModel):
+    policy: dict
+
+
+@app.get("/api/policies")
+def get_policies():
+    """Return the immutable baseline and current submitted proposal."""
+    module = pipeline_module()
+    baseline = read_json(ROOT / "policy.json")
+    proposal_path = PROPOSAL_PATH if PROPOSAL_PATH.exists() else ROOT / "policy.v2.json"
+    proposal = read_json(proposal_path)
+    try:
+        module.validate_policy(baseline)
+        module.validate_policy(proposal)
+    except SystemExit as exc:
+        raise HTTPException(422, str(exc)) from exc
+    def digest(value):
+        return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    return {"baseline": baseline, "proposal": proposal,
+            "baseline_sha256": digest(baseline), "proposal_sha256": digest(proposal),
+            "proposal_source": proposal_path.name}
+
+
+@app.post("/api/policies/validate")
+def validate_submitted_policy(request: PolicySubmission):
+    module = pipeline_module()
+    try:
+        module.validate_policy(request.policy)
+    except SystemExit as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return {"valid": True, "policy_version": request.policy["policy_version"],
+            "rule_count": len(request.policy["rules"])}
+
+
+@app.post("/api/policies/submit")
+def submit_policy(request: PolicySubmission):
+    """Validate first, then atomically save a proposal without mutating the baseline."""
+    module = pipeline_module()
+    try:
+        module.validate_policy(request.policy)
+    except SystemExit as exc:
+        raise HTTPException(422, str(exc)) from exc
+    payload = json.dumps(request.policy, indent=2, ensure_ascii=False) + "\n"
+    temp_path = PROPOSAL_PATH.with_name(f".{PROPOSAL_PATH.name}.{uuid.uuid4().hex}.tmp")
+    temp_path.write_text(payload, encoding="utf-8")
+    temp_path.replace(PROPOSAL_PATH)
+    digest = hashlib.sha256(json.dumps(request.policy, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    return {"saved": True, "proposal_sha256": digest, "proposal_path": PROPOSAL_PATH.name,
+            "policy_version": request.policy["policy_version"]}
 
 
 @app.get("/api/policy-diff")
 def policy_diff():
     module = pipeline_module()
     old = read_json(ROOT / "policy.json")
-    new = read_json(ROOT / "policy.v2.json")
+    new = read_json(PROPOSAL_PATH if PROPOSAL_PATH.exists() else ROOT / "policy.v2.json")
+    try:
+        module.validate_policy(old)
+        module.validate_policy(new)
+    except SystemExit as exc:
+        raise HTTPException(422, str(exc)) from exc
     changes = module.diff_policies(old, new)
     return {"old_version": old.get("policy_version", "unknown"),
             "new_version": new.get("policy_version", "unknown"),
-            "old_sha256": hashlib.sha256(json.dumps(old, sort_keys=True).encode()).hexdigest(),
-            "new_sha256": hashlib.sha256(json.dumps(new, sort_keys=True).encode()).hexdigest(),
+            "old_sha256": hashlib.sha256(json.dumps(old, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
+            "new_sha256": hashlib.sha256(json.dumps(new, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
             "changes": [{"rule_id": c["rule_id"], "change": c["change"],
                          "changed_fields": c.get("changed_fields", []),
                          "before": c.get("before"), "after": c.get("after"),
@@ -255,12 +339,22 @@ def policy_diff():
 @app.get("/api/regression-plan")
 def regression_plan():
     module = pipeline_module()
-    old, new, mapping = (read_json(ROOT / name) for name in ("policy.json", "policy.v2.json", "test_mapping.json"))
+    old = read_json(ROOT / "policy.json")
+    new = read_json(PROPOSAL_PATH if PROPOSAL_PATH.exists() else ROOT / "policy.v2.json")
+    mapping = read_json(ROOT / "test_mapping.json")
+    try:
+        module.validate_policy(old)
+        module.validate_policy(new)
+        module.validate_mapping_rule_ids(mapping, set(module.rule_index(old)) | set(module.rule_index(new)))
+    except SystemExit as exc:
+        raise HTTPException(422, str(exc)) from exc
     changes = module.diff_policies(old, new)
     module.validate_mapping_rule_ids(mapping, set(module.rule_index(old)) | set(module.rule_index(new)))
     plan = module.build_plan(changes, mapping)
     missing = module.validate_nodeid_paths(mapping, ROOT)
     return {"planned_only": True, "selected_tests": plan["selected_tests"], "items": plan["items"],
+            "changes": changes, "baseline_sha256": hashlib.sha256(json.dumps(old, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
+            "proposal_sha256": hashlib.sha256(json.dumps(new, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
             "unmapped_rules": plan["unmapped_rules"], "missing_test_nodeids": missing,
             "old_policy_version": old.get("policy_version", "unknown"),
             "new_policy_version": new.get("policy_version", "unknown")}
