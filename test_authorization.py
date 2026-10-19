@@ -1,6 +1,5 @@
 import os
 import httpx
-import pytest
 
 BASE_URL = os.getenv("AUTH_TRACE_BASE_URL", "http://127.0.0.1:8000")
 EXPECT_VULNERABLE = os.getenv("AUTH_TRACE_EXPECT_VULNERABLE", "0") == "1"

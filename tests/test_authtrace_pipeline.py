@@ -1,0 +1,140 @@
+import html
+import json
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from authtrace_pipeline import (
+    build_plan,
+    diff_policies,
+    render_dashboard,
+    risk_score,
+    run_selected,
+    safe_target,
+    validate_mapping,
+    validate_nodeid_paths,
+)
+
+
+class PolicyPipelineTests(unittest.TestCase):
+    def setUp(self):
+        self.old = {"policy_version": "1", "rules": [
+            {"id": "A", "expected": "deny", "condition": "owner == actor"},
+            {"id": "B", "expected": "allow"},
+        ]}
+        self.new = {"policy_version": "2", "rules": [
+            {"id": "A", "expected": "allow", "condition": "owner == actor"},
+            {"id": "C", "expected": "deny"},
+        ]}
+
+    def test_diff_detects_modified_added_and_removed_rules(self):
+        changes = diff_policies(self.old, self.new)
+        self.assertEqual([(c["rule_id"], c["change"]) for c in changes], [
+            ("A", "modified"), ("B", "removed"), ("C", "added")
+        ])
+        self.assertIn("expected", changes[0]["changed_fields"])
+
+    def test_allowing_previously_denied_action_is_high_risk(self):
+        change = diff_policies(self.old, self.new)[0]
+        self.assertGreaterEqual(risk_score(change), 7)
+
+    def test_allow_to_deny_is_detected(self):
+        change = diff_policies(
+            {"rules": [{"id": "A", "expected": "allow"}]},
+            {"rules": [{"id": "A", "expected": "deny"}]},
+        )[0]
+        self.assertEqual(change["change"], "modified")
+        self.assertGreater(risk_score(change), 1)
+
+    def test_identical_policies_have_no_changes(self):
+        self.assertEqual(diff_policies(self.old, self.old), [])
+
+    def test_plan_prioritizes_risk_and_deduplicates_tests(self):
+        changes = diff_policies(self.old, self.new)
+        mapping = {"mappings": [
+            {"policy_rule_ids": ["A"], "test_nodeids": ["tests/test_a.py::test_a", "tests/test_a.py::test_shared"]},
+            {"policy_rule_ids": ["B"], "test_nodeids": ["tests/test_b.py::test_b", "tests/test_a.py::test_shared"]},
+        ]}
+        plan = build_plan(changes, mapping)
+        self.assertEqual(plan["selected_tests"], [
+            "tests/test_a.py::test_a", "tests/test_a.py::test_shared", "tests/test_b.py::test_b"
+        ])
+        self.assertEqual(plan["unmapped_rules"], ["C"])
+        self.assertGreaterEqual(plan["items"][0]["risk_score"], plan["items"][-1]["risk_score"])
+
+    def test_duplicate_rule_ids_are_rejected(self):
+        with self.assertRaises(SystemExit):
+            diff_policies({"rules": [{"id": "A"}, {"id": "A"}]}, {"rules": []})
+
+    def test_invalid_policy_shapes_are_rejected(self):
+        for policy in (None, [], {}, {"rules": [None]}, {"rules": [{"id": "A", "expected": "maybe"}]}):
+            with self.subTest(policy=policy), self.assertRaises(SystemExit):
+                diff_policies(policy, {"rules": []})
+
+    def test_invalid_mapping_shapes_are_rejected(self):
+        invalid = [
+            None, {}, {"mappings": {}},
+            {"mappings": [None]},
+            {"mappings": [{"policy_rule_ids": [], "test_nodeids": ["tests/test_x.py::test_x"]}]},
+            {"mappings": [{"policy_rule_ids": ["A"], "test_nodeids": []}]},
+            {"mappings": [{"policy_rule_ids": ["A"], "test_nodeids": ["not-a-node-id"]}]},
+        ]
+        for mapping in invalid:
+            with self.subTest(mapping=mapping), self.assertRaises(SystemExit):
+                validate_mapping(mapping)
+
+    def test_duplicate_mappings_are_rejected(self):
+        entry = {"policy_rule_ids": ["A"], "test_nodeids": ["tests/test_x.py::test_x"]}
+        with self.assertRaises(SystemExit):
+            validate_mapping({"mappings": [entry, entry]})
+
+    def test_nonexistent_test_files_are_reported(self):
+        mapping = {"mappings": [
+            {"policy_rule_ids": ["A"], "test_nodeids": ["tests/does_not_exist.py::test_x"]}
+        ]}
+        self.assertEqual(validate_nodeid_paths(mapping), ["tests/does_not_exist.py::test_x"])
+
+    def test_mapping_paths_cannot_escape_repository(self):
+        mapping = {"mappings": [
+            {"policy_rule_ids": ["A"], "test_nodeids": ["../outside.py::test_x"]}
+        ]}
+        self.assertEqual(validate_nodeid_paths(mapping), ["../outside.py::test_x"])
+
+    def test_target_safety_blocks_non_loopback_without_opt_in(self):
+        with patch.dict("os.environ", {}, clear=True), self.assertRaises(SystemExit):
+            safe_target("https://example.com")
+
+    def test_target_safety_rejects_embedded_credentials(self):
+        with self.assertRaises(SystemExit):
+            safe_target("http://user:pass@127.0.0.1:8000")
+
+    def test_target_safety_allows_loopback(self):
+        self.assertEqual(safe_target("http://127.0.0.1:8000/"), "http://127.0.0.1:8000")
+
+    def test_empty_execution_selection_is_error_not_pass(self):
+        results, return_code, overall = run_selected({"selected_tests": []}, "http://127.0.0.1:8000")
+        self.assertEqual(results, [])
+        self.assertNotEqual(return_code, 0)
+        self.assertEqual(overall, "ERROR")
+
+    def test_dashboard_escapes_untrusted_values(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "dashboard.html"
+            render_dashboard({
+                "generated_at": '<script>alert("x")</script>',
+                "overall": "PLANNED",
+                "plan": {"items": [{
+                    "rule_id": '<img src=x onerror=alert(1)>',
+                    "risk": "high",
+                    "test_nodeids": ["tests/test_x.py::test_x"],
+                }]},
+            }, target)
+            text = target.read_text(encoding="utf-8")
+            self.assertNotIn('<script>alert("x")</script>', text)
+            self.assertNotIn('<img src=x onerror=alert(1)>', text)
+            self.assertIn(html.escape('<img src=x onerror=alert(1)>'), text)
+
+
+if __name__ == "__main__":
+    unittest.main()
