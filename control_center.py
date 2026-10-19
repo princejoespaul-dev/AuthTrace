@@ -122,8 +122,8 @@ def overview():
         counts = conn.execute("""SELECT
             COUNT(*) total,
             SUM(CASE WHEN overall IN ('NO_SEEDED_BOLA_OBSERVED','PASS') THEN 1 ELSE 0 END) passed,
-            SUM(CASE WHEN overall IN ('VULNERABILITY_DETECTED','FAIL') THEN 1 ELSE 0 END) failed,
-            SUM(CASE WHEN overall IN ('INCONCLUSIVE','ERROR') THEN 1 ELSE 0 END) inconclusive
+            SUM(CASE WHEN overall IN ('VULNERABILITY_DETECTED','FAIL','SECURITY_REGRESSION','POLICY_MISMATCH') THEN 1 ELSE 0 END) failed,
+            SUM(CASE WHEN overall IN ('INCONCLUSIVE','ERROR','TIMEOUT') THEN 1 ELSE 0 END) inconclusive
             FROM runs""").fetchone()
         open_findings = conn.execute("SELECT COUNT(*) n FROM findings WHERE status='Open'").fetchone()["n"]
     latest = read_json(REPORT_DIR / "latest.json") if (REPORT_DIR / "latest.json").exists() else {}
@@ -220,8 +220,11 @@ def start_run(request: RunRequest):
                    "coverage_gaps": coverage_gaps}
         def digest(value):
             return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        baseline_hash, proposal_hash = digest(baseline), digest(proposal)
         report = {"run_id": run_id, "generated_at": now(), "overall": overall,
-                  "target": target, "baseline_sha256": digest(baseline), "proposal_sha256": digest(proposal),
+                  "target": target, "baseline_sha256": baseline_hash, "proposal_sha256": proposal_hash,
+                  "policy_versions": {"old": baseline["policy_version"], "new": proposal["policy_version"],
+                                      "old_sha256": baseline_hash, "new_sha256": proposal_hash},
                   "changed_rules": changes, "selected_tests": plan["selected_tests"],
                   "selection": plan["items"], "coverage_gaps": coverage_gaps,
                   "checks": checks, "summary": summary,
