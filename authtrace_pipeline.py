@@ -45,8 +45,14 @@ def rule_index(policy):
             raise SystemExit(f"Policy rule at index {index} must have a non-empty string id.")
         if rule_id in result:
             raise SystemExit(f"Duplicate policy rule id: {rule_id}")
+        for field in ("actor", "action", "resource", "condition"):
+            value = rule.get(field)
+            if value is not None and (not isinstance(value, str) or not value.strip()):
+                raise SystemExit(f"Rule {rule_id}: {field} must be a non-empty string when provided.")
         expected = rule.get("expected")
-        if expected is not None and (not isinstance(expected, str) or expected not in {"allow", "deny"}):
+        if expected is not None and (
+            not isinstance(expected, str) or expected not in {"allow", "deny"}
+        ):
             raise SystemExit(f"Rule {rule_id}: expected must be 'allow' or 'deny'.")
         result[rule_id] = rule
     return result
@@ -197,6 +203,8 @@ def safe_target(base_url):
         raise SystemExit("Blocked: target must be an HTTP(S) URL with a hostname.")
     if parsed.username or parsed.password:
         raise SystemExit("Blocked: do not embed credentials in the target URL.")
+    if parsed.query or parsed.fragment:
+        raise SystemExit("Blocked: target URL must not contain a query string or fragment.")
     try:
         import ipaddress
         address = ipaddress.ip_address(parsed.hostname)
