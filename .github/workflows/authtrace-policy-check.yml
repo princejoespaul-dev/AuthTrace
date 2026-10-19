@@ -22,6 +22,43 @@ jobs:
         run: python -m pytest -q tests/test_authtrace_pipeline.py
       - name: Test control center safety and policy APIs
         run: python -m pytest -q tests/test_control_center.py
+      - name: Start fixed demo API and test real authorization behavior
+        run: |
+          AUTH_TRACE_MODE=fixed python -m uvicorn demo_api:app --host 127.0.0.1 --port 8000 > /tmp/authtrace-fixed.log 2>&1 &
+          echo $! > /tmp/authtrace-fixed.pid
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8000/health > /dev/null; then break; fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:8000/health
+          python -m pytest -q test_authorization.py
+      - name: Prove vulnerable mode is detected from actual API responses
+        run: |
+          AUTH_TRACE_MODE=vulnerable python -m uvicorn demo_api:app --host 127.0.0.1 --port 8001 > /tmp/authtrace-vulnerable.log 2>&1 &
+          echo $! > /tmp/authtrace-vulnerable.pid
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8001/health > /dev/null; then break; fi
+            sleep 1
+          done
+          python - <<'PY'
+          from authtrace_pipeline import run_selected
+          nodeid = "test_authorization.py::test_cross_user_access_matches_declared_mode"
+          plan = {"selected_tests": [nodeid], "items": [
+              {"rule_id": "INV-READ-OTHER", "test_nodeids": [nodeid]}
+          ]}
+          checks, return_code, overall = run_selected(
+              plan, "http://127.0.0.1:8001", {"INV-READ-OTHER": "deny"}, timeout_seconds=10
+          )
+          assert overall == "SECURITY_REGRESSION", (overall, checks)
+          assert checks[0]["evidence"]["security_invariant_violated"] is True, checks
+          print("Confirmed: vulnerable API behavior produced a security regression finding.")
+          PY
+      - name: Stop local demo APIs
+        if: always()
+        run: |
+          for pidfile in /tmp/authtrace-fixed.pid /tmp/authtrace-vulnerable.pid; do
+            if [ -f "$pidfile" ]; then kill "$(cat "$pidfile")" 2>/dev/null || true; fi
+          done
       - name: Build policy impact plan and evidence artifacts
         run: python authtrace_pipeline.py --fail-on-unmapped
       - name: Upload policy impact report
