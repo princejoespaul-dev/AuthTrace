@@ -166,18 +166,17 @@ See [`README_POLICY_PIPELINE.md`](README_POLICY_PIPELINE.md) for policy diffing,
 - A green planner test run validates policy-diff mechanics, not the security of a running API.
 - JSON evidence includes run timestamps and run IDs, so byte-for-byte report output is not identical across runs; policy hashes and test selection are stable for identical inputs.
 
-## 9. Suggested implementation milestones
-1. Run fixed mode and confirm own-object access passes and cross-user access is denied.
-2. Run vulnerable mode and confirm the cross-user check detects the seeded issue.
-3. Add negative controls (admin allowed; User A own invoice allowed).
-4. Add retrieval source citations to every generated explanation.
-5. Measure seeded-flaw recall, false-positive rate, evidence completeness, and repeatability.
-6. Only then add BFLA, property-level authorization, or carefully isolated write tests.
+## 9. Competition verification checklist
 
+1. Start the fixed demo API and run `python -m pytest -q`.
+2. Submit a proposal that changes `INV-READ-OTHER.expected` to `allow`; fixed mode should report a policy mismatch because the API denies cross-user access.
+3. Restart the demo in vulnerable mode and run the selected regression plan; returning User B's invoice to User A must produce a security-regression finding.
+4. Inspect the saved run in Test Runs / Evidence Explorer and confirm its run ID, policy hashes, selected rule IDs, and sanitized expected-versus-observed evidence.
+5. Keep both services bound to loopback. The control center is a local development tool, not a multi-user production deployment.
 
 ## 10. AuthTrace Security Control Center
 
-The new local-first dashboard connects the existing demo API, sanitized authorization runner, policy-diff pipeline, and persisted run history. It is a student-project workbench, not a production scanner.
+The dashboard connects policy submission, strict validation, deterministic diffing, test mapping, selected pytest execution, sanitized evidence, and SQLite run history. It is a competition-focused workbench, not a production scanner.
 
 ### Start the dashboard
 
@@ -193,34 +192,25 @@ uvicorn demo_api:app --host 127.0.0.1 --port 8000
 uvicorn control_center:app --host 127.0.0.1 --port 8010
 ```
 
-Open http://127.0.0.1:8010 in your browser. The API documentation is available at http://127.0.0.1:8010/docs.
-
-On Windows PowerShell, the same `uvicorn` commands work after activating the virtual environment.
+Open [http://127.0.0.1:8010](http://127.0.0.1:8010). The API documentation is available at [http://127.0.0.1:8010/docs](http://127.0.0.1:8010/docs).
 
 ### Implemented dashboard functionality
 
-- Live overview metrics and recent runs from the local SQLite database.
-- Guided execution of the existing three read-only synthetic invoice authorization checks, with an explicit local-target confirmation.
-- Persistent run status, duration, sanitized report data, and error records.
-- Policy diff backed by `authtrace_pipeline.py`, including changed fields, SHA-256 policy hashes, risk heuristic, and rationale.
-- Regression plan preview with mapped tests, deduplication, unmapped rules, and missing test-file checks. The plan is explicitly labeled as not executed.
-- Finding status persistence for a cross-user invoice-access finding detected by a run.
-- Evidence/run detail view and JSON report download.
-- Local target scope screen, implemented test catalog, appearance toggle, responsive layout, and empty/error states.
+- Read-only baseline policy view and editable proposal editor.
+- Strict policy validation and proposal submission to `policy.proposed.json`; `policy.json` remains the baseline.
+- Exact added, removed, and modified rules, changed fields, before/after values, and canonical SHA-256 hashes.
+- Deduplicated regression plan with selection rationale, unmapped rule coverage gaps, and missing test-path checks.
+- Run Selected Tests action that executes only mapped tests for changed rules, with bounded subprocess timeouts and safe argument lists.
+- Run-specific SQLite history containing policy hashes, changed rules, selected tests, expected/observed evidence, status classifications, and sanitized diagnostics.
+- Security-regression classification that is independent from whether observed behavior matches the submitted policy.
+- Loopback-only target enforcement; no external target is enabled by default.
 
 ### Verify the control center
 
 ```bash
-python -m unittest tests.test_authtrace_pipeline tests.test_control_center -v
-pytest -v
+python -m pytest -q tests/test_authtrace_pipeline.py
+python -m pytest -q tests/test_control_center.py
+python -m pytest -q
 ```
 
-The control-center run endpoint executes the fixed `run_checks.py` command using an argument list, without a shell, and applies a 30-second timeout. It only permits the local demo target `http://127.0.0.1:8000`; it does not enable arbitrary external target testing. Run history is stored in `reports/authtrace.db`, and the latest sanitized runner report is `reports/latest.json`.
-
-### Current limitations
-
-- BFLA role/action matrices, write authorization, ownership-field tampering, and broader property-level authorization are not implemented.
-- The policy regression planner is a preview only in the dashboard; the dashboard does not launch its selected arbitrary pytest node IDs.
-- The demo API's fixed/vulnerable mode is configured when the demo server starts. A finding is created when the runner observes the seeded cross-user access violation.
-- The control center uses a local SQLite file and is intended for local development, not multi-user deployment. Do not expose it to a public network.
-- Browser-to-demo connection status is separate from a security test result; a connection failure is not reported as a passed check.
+CI also starts the local fixed and vulnerable demo API modes and verifies that a real cross-user response in vulnerable mode is classified as a security regression. Run history is stored in `reports/authtrace.db`, and the latest sanitized report is written to `reports/latest.json`. Keep the control center bound to `127.0.0.1`; authentication is not implemented.
