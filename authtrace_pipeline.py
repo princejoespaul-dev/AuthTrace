@@ -359,12 +359,22 @@ def run_selected(plan, base_url, expected_outcomes=None, timeout_seconds=30):
             collection_error = any(x in lower for x in (
                 "error collecting", "no tests ran", "not found:", "importerror", "modulenotfounderror",
             ))
+            connection_error = any(x in lower for x in (
+                "connecterror", "connecttimeout", "readtimeout", "connection refused",
+                "remoteprotocolerror", "network is unreachable",
+            ))
             if collection_error or proc.returncode not in (0, 1):
                 status, error_class = "ERROR", "COLLECTION_OR_RUNNER_ERROR"
-            elif proc.returncode == 0:
-                status, error_class = "PASS", None
+            elif connection_error:
+                status, error_class = "ERROR", "API_CONNECTION_ERROR"
             elif evidence and evidence.get("classification") == "SECURITY_REGRESSION":
                 status, error_class = "SECURITY_REGRESSION", "AUTHORIZATION_INVARIANT_VIOLATION"
+            elif evidence and evidence.get("classification") == "MALFORMED_RESPONSE":
+                status, error_class = "ERROR", "MALFORMED_API_RESPONSE"
+            elif evidence and evidence.get("classification") == "API_ERROR":
+                status, error_class = "ERROR", "API_RESPONSE_ERROR"
+            elif proc.returncode == 0:
+                status, error_class = "PASS", None
             elif evidence and evidence.get("classification") == "POLICY_MISMATCH":
                 status, error_class = "POLICY_MISMATCH", "OBSERVED_BEHAVIOR_DIFFERS_FROM_POLICY"
             else:
