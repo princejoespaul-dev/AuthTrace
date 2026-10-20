@@ -21,7 +21,7 @@ class DashboardUiSmokeTests(unittest.TestCase):
                 self.assertIn(f'data-page="{page}"', self.html)
 
     def test_results_explain_security_outcomes_in_plain_language(self):
-        for label in ("Policy mismatch", "Security regression", "Observed behavior did not match",
+        for label in ("Policy mismatch", "Security regression", "observed API behavior did not match",
                       "does not prove the whole API is secure", "Technical evidence"):
             with self.subTest(label=label):
                 self.assertIn(label, self.html)
