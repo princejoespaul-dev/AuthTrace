@@ -63,7 +63,7 @@ def test_dashboard_in_chromium():
             if page_id == "diff":
                 policies_before = page.request.get(f"{BASE_URL}/api/policies").json()
                 page.locator('[data-example="unsafe"]').click()
-                expect(page.locator("#policyEditor")).to_contain_text('"expected": "allow"')
+                assert '"expected": "allow"' in page.locator("#policyEditor").input_value()
                 expect(page.locator("#policyMessage")).to_contain_text("editor only")
                 # Loading and validating examples must not silently submit them.
                 page.locator("#validatePolicy").click()
