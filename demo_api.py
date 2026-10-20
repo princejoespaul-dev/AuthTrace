@@ -1,7 +1,21 @@
 import os
 from fastapi import FastAPI, Header, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="AuthTrace Synthetic Demo API")
+
+# The dashboard runs on port 8010 and the synthetic demo API on port 8000.
+# Permit only the local dashboard origins; do not use a wildcard for auth headers.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://127.0.0.1:8010",
+        "http://localhost:8010",
+    ],
+    allow_credentials=False,
+    allow_methods=["GET", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+)
 
 MODE = os.getenv("AUTH_TRACE_MODE", "fixed").strip().lower()
 if MODE not in {"fixed", "vulnerable"}:
