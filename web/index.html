@@ -35,7 +35,7 @@
 <div class="sidebar-bottom"><div class="local-tag"><span class="dot"></span> LOCAL-FIRST MODE</div><p>Only the synthetic API on loopback is enabled. External targets are blocked.</p></div>
 </aside>
 <main class="main">
-<header class="topbar"><div class="crumb">AuthTrace <span class="muted">/</span> <strong id="crumb">Overview</strong></div><div class="top-actions"><input class="search" id="search" placeholder="Search this view… ( / )" aria-label="Search current view"><div class="connection"><span class="dot"></span><span id="connection">Checking API</span></div><button class="btn" id="themeBtn" title="Toggle light and dark theme">◐</button><button class="btn primary" id="quickRun">＋ New test run</button></div></header>
+<header class="topbar"><div class="crumb">AuthTrace <span class="muted">/</span> <strong id="crumb">Overview</strong></div><div class="top-actions"><input class="search" id="search" placeholder="Jump to a page… ( / )" aria-label="Search current view"><div class="connection"><span class="dot"></span><span id="connection">Checking API</span></div><button class="btn" id="themeBtn" title="Toggle light and dark theme">◐</button><button class="btn primary" id="quickRun">＋ New test run</button></div></header>
 <div class="content" id="content"><div class="empty">Loading AuthTrace control center…</div></div>
 </main>
 </div>
@@ -46,7 +46,7 @@ let page='overview', overviewData=null, currentRun=null, pollHandle=null;
 const pageNames={overview:'Overview',lab:'Test Lab',runs:'Test Runs',findings:'Vulnerabilities',diff:'Policy Diff',planner:'Regression Planner',evidence:'Evidence Explorer',targets:'API Targets',suites:'Test Suites',reports:'Reports',settings:'Settings'};
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const date=s=>s?new Date(s).toLocaleString():'—';
-const statusClass=s=>{s=String(s||'').toLowerCase();if(/pass|no_seeded/.test(s))return'pass';if(/fail|vulnerability/.test(s))return'fail';if(/error/.test(s))return'error';if(/running|queued/.test(s))return'running';if(/planned|mapping/.test(s))return'planned';return'inconclusive'};
+const statusClass=s=>{s=String(s||'').toLowerCase();if(/pass|no_seeded/.test(s))return'pass';if(/security_regression|policy_mismatch|fail|vulnerability/.test(s))return'fail';if(/error|timeout/.test(s))return'error';if(/running|queued/.test(s))return'running';if(/planned|mapping/.test(s))return'planned';return'inconclusive'};
 const badge=s=>'<span class="status '+statusClass(s)+'"><span class="dot"></span>'+esc(s||'UNKNOWN')+'</span>';
 function toast(msg,error=false){const t=$('#toast');t.textContent=msg;t.className='toast'+(error?' error':'');setTimeout(()=>t.classList.add('hidden'),4200)}
 async function api(path,opts={}){const r=await fetch(path,{headers:{'Content-Type':'application/json',...(opts.headers||{})},...opts});const type=r.headers.get('content-type')||'';const data=type.includes('json')?await r.json():await r.text();if(!r.ok)throw new Error(data.detail||data.message||('Request failed ('+r.status+')'));return data}
