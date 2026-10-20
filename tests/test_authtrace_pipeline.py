@@ -261,7 +261,7 @@ class PolicyPipelineTests(unittest.TestCase):
         for statuses, expected_status, expected_rc in cases:
             with self.subTest(statuses=statuses):
                 self.assertEqual(_aggregate_status(statuses), expected_status)
-                self.assertEqual(_aggregate_return_code(statuses, [0] * len(statuses)), expected_rc)
+                self.assertEqual(_aggregate_return_code(statuses), expected_rc)
 
     def test_aggregate_prioritizes_security_finding_over_other_failures(self):
         from authtrace_pipeline import _aggregate_status
