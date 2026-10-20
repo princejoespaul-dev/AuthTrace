@@ -101,7 +101,7 @@ def test_dashboard_in_chromium():
         # The advanced menu remains expanded after visiting an advanced page.
         page.locator('button[data-page="evidence"]').click()
         expect(page.locator("#content h1")).to_contain_text("Evidence Explorer")
-        page.locator("#evidenceDetail").locator("[data-run]").first.click()
+        page.locator('button[data-run]').first.click()
         expect(page.locator("#evidenceDetail")).to_contain_text("Test run results", timeout=15000)
         expect(page.locator("#evidenceDetail")).to_contain_text("Technical report")
 
