@@ -177,6 +177,13 @@ class PolicyPipelineTests(unittest.TestCase):
         self.assertEqual(overall, "POLICY_MISMATCH")
         self.assertNotEqual(rc, 0)
 
+    def test_security_evidence_survives_unexpected_pytest_exit(self):
+        evidence = {"classification": "SECURITY_REGRESSION", "security_invariant_violated": True}
+        results, rc, overall = self._run_mocked_evidence(evidence, returncode=2)
+        self.assertEqual(results[0]["verdict"], "SECURITY_REGRESSION")
+        self.assertEqual(overall, "SECURITY_REGRESSION")
+        self.assertNotEqual(rc, 0)
+
     def test_zero_exit_security_regression_never_passes(self):
         evidence = {"classification": "SECURITY_REGRESSION", "security_invariant_violated": True}
         results, rc, overall = self._run_mocked_evidence(evidence)
@@ -254,6 +261,8 @@ class PolicyPipelineTests(unittest.TestCase):
             (["PASS", "TIMEOUT"], "TIMEOUT", 124),
             (["PASS", "POLICY_MISMATCH"], "POLICY_MISMATCH", 1),
             (["PASS", "SECURITY_REGRESSION"], "SECURITY_REGRESSION", 1),
+            (["INCONCLUSIVE", "ERROR", "TIMEOUT", "POLICY_MISMATCH", "SECURITY_REGRESSION"],
+             "SECURITY_REGRESSION", 1),
             (["PASS", "MYSTERY"], "INCONCLUSIVE", 1),
             (["PASS"], "PASS", 0),
             ([], "ERROR", 2),
