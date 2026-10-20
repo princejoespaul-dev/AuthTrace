@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0",
+  "description": "Human-reviewed mapping from policy rule IDs to pytest node IDs. Keep mappings in sync when tests are renamed.",
+  "mappings": [
+    {
+      "policy_rule_ids": ["INV-READ-OWN"],
+      "test_nodeids": ["test_authorization.py::test_user_can_read_own_invoice"],
+      "test_area": "object-authorization",
+      "rationale": "Confirms a user can read their own invoice."
+    },
+    {
+      "policy_rule_ids": ["INV-READ-OTHER"],
+      "test_nodeids": ["test_authorization.py::test_cross_user_access_matches_declared_mode"],
+      "test_area": "cross-user-object-authorization",
+      "rationale": "Checks that a user cannot read another user's invoice; this is the highest-risk negative authorization control."
+    },
+    {
+      "policy_rule_ids": ["INV-READ-ADMIN"],
+      "test_nodeids": ["test_authorization.py::test_admin_can_read_other_users_invoice"],
+      "test_area": "role-authorization",
+      "rationale": "Confirms administrator access remains available."
+    }
+  ]
+}
