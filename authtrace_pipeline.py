@@ -367,10 +367,14 @@ def _classify_evidence(evidence, expected_outcomes, rule_ids, return_code):
     if not policy_match:
         return "POLICY_MISMATCH", "OBSERVED_BEHAVIOR_DIFFERS_FROM_POLICY"
 
-    # Evidence expectations must agree with the policy version supplied to the runner.
+    # A passing result must be tied to a mapped rule and its declared expectation.
+    if not rule_ids:
+        return "INCONCLUSIVE", "NO_ASSOCIATED_POLICY_RULE"
     for rule_id in rule_ids:
         configured_expected = expected_outcomes.get(rule_id)
-        if configured_expected is not None and configured_expected != expected:
+        if configured_expected not in {"allow", "deny"}:
+            return "INCONCLUSIVE", "MISSING_EXPECTED_OUTCOME"
+        if configured_expected != expected:
             return "INCONCLUSIVE", "EXPECTED_OUTCOME_CONFLICT"
     if return_code != 0:
         return "FAIL", "PYTEST_FAILED_DESPITE_COMPLIANT_EVIDENCE"
