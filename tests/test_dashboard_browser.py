@@ -3,7 +3,11 @@
 Runs against the local synthetic API only; never targets an external service.
 """
 from pathlib import Path
-from playwright.sync_api import sync_playwright, expect
+import pytest
+
+playwright_api = pytest.importorskip("playwright.sync_api")
+sync_playwright = playwright_api.sync_playwright
+expect = playwright_api.expect
 
 BASE_URL = "http://127.0.0.1:8010"
 ARTIFACTS = Path("artifacts")
