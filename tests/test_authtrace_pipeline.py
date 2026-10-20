@@ -157,6 +157,120 @@ class PolicyPipelineTests(unittest.TestCase):
         self.assertEqual(overall, "POLICY_MISMATCH")
         self.assertNotEqual(return_code, 0)
 
+    def _run_mocked_evidence(self, evidence, returncode=0, output_suffix=""):
+        nodeid = "test_authorization.py::test_cross_user_access_matches_declared_mode"
+        plan = {"selected_tests": [nodeid], "items": [
+            {"rule_id": "INV-READ-OTHER", "test_nodeids": [nodeid]}
+        ]}
+        output = ("" if evidence is None else "AUTHTRACE_EVIDENCE=" + (
+            evidence if isinstance(evidence, str) else json.dumps(evidence)
+        ) + "\n") + output_suffix
+        proc = subprocess.CompletedProcess(args=["pytest"], returncode=returncode, stdout=output)
+        with patch("authtrace_pipeline.subprocess.run", return_value=proc):
+            return run_selected(plan, "http://127.0.0.1:8000", {"INV-READ-OTHER": "allow"})
+
+    def test_zero_exit_policy_mismatch_never_passes(self):
+        evidence = {"classification": "POLICY_MISMATCH", "expected": "allow", "observed": "deny",
+                    "policy_match": False, "security_invariant_violated": False, "http_status": 403}
+        results, rc, overall = self._run_mocked_evidence(evidence)
+        self.assertEqual(results[0]["verdict"], "POLICY_MISMATCH")
+        self.assertEqual(overall, "POLICY_MISMATCH")
+        self.assertNotEqual(rc, 0)
+
+    def test_zero_exit_security_regression_never_passes(self):
+        evidence = {"classification": "SECURITY_REGRESSION", "security_invariant_violated": True}
+        results, rc, overall = self._run_mocked_evidence(evidence)
+        self.assertEqual(results[0]["verdict"], "SECURITY_REGRESSION")
+        self.assertEqual(overall, "SECURITY_REGRESSION")
+        self.assertNotEqual(rc, 0)
+
+    def test_zero_exit_without_evidence_is_inconclusive(self):
+        results, rc, overall = self._run_mocked_evidence(None)
+        self.assertEqual(results[0]["verdict"], "INCONCLUSIVE")
+        self.assertEqual(overall, "INCONCLUSIVE")
+        self.assertNotEqual(rc, 0)
+
+    def test_complete_consistent_policy_match_passes(self):
+        evidence = {"classification": "POLICY_MATCH", "expected": "allow", "observed": "allow",
+                    "policy_match": True, "security_invariant_violated": False, "http_status": 200}
+        results, rc, overall = self._run_mocked_evidence(evidence)
+        self.assertEqual(results[0]["verdict"], "PASS")
+        self.assertEqual(overall, "PASS")
+        self.assertEqual(rc, 0)
+
+    def test_violated_security_invariant_is_security_regression(self):
+        evidence = {"classification": "POLICY_MATCH", "expected": "allow", "observed": "allow",
+                    "policy_match": True, "security_invariant_violated": True, "http_status": 200}
+        results, rc, overall = self._run_mocked_evidence(evidence)
+        self.assertEqual(results[0]["verdict"], "SECURITY_REGRESSION")
+        self.assertNotEqual(rc, 0)
+
+    def test_malformed_or_incomplete_evidence_is_non_passing(self):
+        for evidence in ("{not-json", {"classification": "POLICY_MATCH", "expected": "allow"}):
+            with self.subTest(evidence=evidence):
+                results, rc, overall = self._run_mocked_evidence(evidence)
+                self.assertNotEqual(results[0]["verdict"], "PASS")
+                self.assertNotEqual(rc, 0)
+
+    def test_contradictory_evidence_is_inconclusive(self):
+        evidence = {"classification": "POLICY_MATCH", "expected": "allow", "observed": "deny",
+                    "policy_match": True, "security_invariant_violated": False, "http_status": 403}
+        results, rc, overall = self._run_mocked_evidence(evidence)
+        self.assertEqual(results[0]["verdict"], "INCONCLUSIVE")
+        self.assertNotEqual(rc, 0)
+
+    def test_zero_exit_unknown_classification_is_inconclusive(self):
+        evidence = {"classification": "UNRECOGNIZED", "expected": "allow", "observed": "allow",
+                    "policy_match": True, "security_invariant_violated": False, "http_status": 200}
+        results, rc, overall = self._run_mocked_evidence(evidence)
+        self.assertEqual(results[0]["verdict"], "INCONCLUSIVE")
+        self.assertNotEqual(rc, 0)
+
+    def test_evidence_expected_outcome_conflict_is_inconclusive(self):
+        evidence = {"classification": "POLICY_MATCH", "expected": "deny", "observed": "deny",
+                    "policy_match": True, "security_invariant_violated": False, "http_status": 403}
+        results, rc, overall = self._run_mocked_evidence(evidence)
+        self.assertEqual(results[0]["verdict"], "INCONCLUSIVE")
+        self.assertNotEqual(rc, 0)
+
+    def test_connection_error_is_error_even_if_process_exit_is_zero(self):
+        nodeid = "test_authorization.py::test_cross_user_access_matches_declared_mode"
+        plan = {"selected_tests": [nodeid], "items": []}
+        proc = subprocess.CompletedProcess(args=["pytest"], returncode=0,
+                                           stdout="httpx.ConnectError: connection refused")
+        with patch("authtrace_pipeline.subprocess.run", return_value=proc):
+            results, rc, overall = run_selected(plan, "http://127.0.0.1:8000")
+        self.assertEqual(results[0]["verdict"], "ERROR")
+        self.assertEqual(results[0]["error_class"], "API_CONNECTION_ERROR")
+        self.assertEqual(overall, "ERROR")
+        self.assertNotEqual(rc, 0)
+
+    def test_aggregate_status_and_exit_code_are_conservative(self):
+        from authtrace_pipeline import _aggregate_return_code, _aggregate_status
+
+        cases = [
+            (["INCONCLUSIVE"], "INCONCLUSIVE", 1),
+            (["PASS", "ERROR"], "ERROR", 2),
+            (["PASS", "TIMEOUT"], "TIMEOUT", 124),
+            (["PASS", "POLICY_MISMATCH"], "POLICY_MISMATCH", 1),
+            (["PASS", "SECURITY_REGRESSION"], "SECURITY_REGRESSION", 1),
+            (["PASS", "MYSTERY"], "INCONCLUSIVE", 1),
+            (["PASS"], "PASS", 0),
+            ([], "ERROR", 2),
+        ]
+        for statuses, expected_status, expected_rc in cases:
+            with self.subTest(statuses=statuses):
+                self.assertEqual(_aggregate_status(statuses), expected_status)
+                self.assertEqual(_aggregate_return_code(statuses, [0] * len(statuses)), expected_rc)
+
+    def test_aggregate_prioritizes_security_finding_over_other_failures(self):
+        from authtrace_pipeline import _aggregate_status
+        self.assertEqual(
+            _aggregate_status(["INCONCLUSIVE", "ERROR", "TIMEOUT", "POLICY_MISMATCH",
+                               "SECURITY_REGRESSION"]),
+            "SECURITY_REGRESSION",
+        )
+
     def test_empty_execution_selection_is_error_not_pass(self):
         results, return_code, overall = run_selected({"selected_tests": []}, "http://127.0.0.1:8000")
         self.assertEqual(results, [])
