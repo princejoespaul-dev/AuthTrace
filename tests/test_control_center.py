@@ -42,6 +42,13 @@ class PolicyApiTests(unittest.TestCase):
         self.assertIn("new_sha256", result)
         self.assertTrue(all("risk_score" in item for item in result["changes"]))
 
+    def test_checked_in_policy_v2_is_default_when_no_local_proposal_exists(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(control_center, "PROPOSAL_PATH", Path(directory) / "policy.proposed.json"):
+                result = control_center.get_policies()
+        self.assertEqual(result["proposal_source"], "policy.v2.json")
+        self.assertEqual(result["proposal"]["policy_version"], "2.0")
+
     def test_regression_plan_is_explicitly_planned_not_executed(self):
         result = control_center.regression_plan()
         self.assertTrue(result["planned_only"])
