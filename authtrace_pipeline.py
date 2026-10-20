@@ -329,19 +329,97 @@ th{background:#f4f6f8}.note{margin-top:1.5rem;padding:1rem;background:#f7f8fa}
     return output_path
 
 
+def _classify_evidence(evidence, expected_outcomes, rule_ids, return_code):
+    """Classify only recognized, internally consistent authorization evidence."""
+    if not isinstance(evidence, dict):
+        return "INCONCLUSIVE", "MISSING_OR_INVALID_EVIDENCE"
+
+    classification = evidence.get("classification")
+    # Explicit security findings are authoritative and must never be downgraded.
+    if classification == "SECURITY_REGRESSION" or evidence.get("security_invariant_violated") is True:
+        return "SECURITY_REGRESSION", "AUTHORIZATION_INVARIANT_VIOLATION"
+    if classification == "POLICY_MISMATCH":
+        return "POLICY_MISMATCH", "OBSERVED_BEHAVIOR_DIFFERS_FROM_POLICY"
+    if classification in {"MALFORMED_RESPONSE", "API_ERROR"}:
+        return "ERROR", ("MALFORMED_API_RESPONSE" if classification == "MALFORMED_RESPONSE"
+                         else "API_RESPONSE_ERROR")
+    if classification != "POLICY_MATCH":
+        return "INCONCLUSIVE", "UNKNOWN_OR_MISSING_CLASSIFICATION"
+
+    expected = evidence.get("expected")
+    observed = evidence.get("observed")
+    http_status = evidence.get("http_status")
+    policy_match = evidence.get("policy_match")
+    invariant = evidence.get("security_invariant_violated")
+    if (expected not in {"allow", "deny"} or observed not in {"allow", "deny"}
+            or not isinstance(http_status, int) or isinstance(http_status, bool)
+            or not isinstance(policy_match, bool) or not isinstance(invariant, bool)):
+        return "INCONCLUSIVE", "INCOMPLETE_EVIDENCE"
+    if invariant:
+        return "SECURITY_REGRESSION", "AUTHORIZATION_INVARIANT_VIOLATION"
+
+    status_matches_observation = (
+        (observed == "allow" and http_status == 200)
+        or (observed == "deny" and http_status in {401, 403, 404})
+    )
+    if not status_matches_observation or policy_match != (expected == observed):
+        return "INCONCLUSIVE", "CONTRADICTORY_EVIDENCE"
+    if not policy_match:
+        return "POLICY_MISMATCH", "OBSERVED_BEHAVIOR_DIFFERS_FROM_POLICY"
+
+    # Evidence expectations must agree with the policy version supplied to the runner.
+    for rule_id in rule_ids:
+        configured_expected = expected_outcomes.get(rule_id)
+        if configured_expected is not None and configured_expected != expected:
+            return "INCONCLUSIVE", "EXPECTED_OUTCOME_CONFLICT"
+    if return_code != 0:
+        return "FAIL", "PYTEST_FAILED_DESPITE_COMPLIANT_EVIDENCE"
+    return "PASS", None
+
+
+def _aggregate_status(statuses):
+    """Return a conservative aggregate; no unknown status may fall through to PASS."""
+    priority = (
+        "SECURITY_REGRESSION", "POLICY_MISMATCH", "ERROR", "TIMEOUT",
+        "INCONCLUSIVE", "FAIL", "PASS",
+    )
+    if not statuses:
+        return "ERROR"
+    for status in priority:
+        if status in statuses:
+            return status
+    return "INCONCLUSIVE"
+
+
+def _aggregate_return_code(statuses, process_codes):
+    """Keep pytest's ordinary failure code while ensuring every non-pass fails CI."""
+    overall = _aggregate_status(statuses)
+    if overall == "PASS":
+        return 0
+    if overall in {"ERROR", "TIMEOUT"}:
+        # Preserve the runner's established timeout (124) and error (2) conventions.
+        if 124 in process_codes:
+            return 124
+        return 2
+    return 1
+
+
 def run_selected(plan, base_url, expected_outcomes=None, timeout_seconds=30):
-    """Run only validated selected pytest node IDs and retain sanitized evidence."""
+    """Run selected pytest nodes; a PASS requires complete, consistent evidence."""
     safe_target(base_url)
-    if not plan["selected_tests"]:
+    if not plan.get("selected_tests"):
         return [], 2, "ERROR"
     env = os.environ.copy()
     env["AUTH_TRACE_BASE_URL"] = base_url
     env["AUTH_TRACE_EXPECTED_OUTCOMES"] = json.dumps(expected_outcomes or {})
-    results, overall_rc, statuses = [], 0, []
+    expected_outcomes = expected_outcomes or {}
+    results, statuses, process_codes = [], [], []
+
     for nodeid in plan["selected_tests"]:
         started = time.monotonic()
         evidence = None
         output = ""
+        failure = None
         try:
             proc = subprocess.run(
                 [sys.executable, "-m", "pytest", "-q", "-s", nodeid],
@@ -350,12 +428,13 @@ def run_selected(plan, base_url, expected_outcomes=None, timeout_seconds=30):
             )
             output = proc.stdout or ""
             duration = round(time.monotonic() - started, 3)
-            for line in output.splitlines():
-                if line.startswith("AUTHTRACE_EVIDENCE="):
-                    try:
-                        evidence = json.loads(line.split("=", 1)[1])
-                    except json.JSONDecodeError:
-                        evidence = {"error": "Malformed structured test evidence"}
+            evidence_lines = [line.split("=", 1)[1] for line in output.splitlines()
+                              if line.startswith("AUTHTRACE_EVIDENCE=")]
+            if len(evidence_lines) == 1:
+                try:
+                    evidence = json.loads(evidence_lines[0])
+                except (json.JSONDecodeError, TypeError):
+                    evidence = None
             lower = output.lower()
             collection_error = any(x in lower for x in (
                 "error collecting", "no tests ran", "not found:", "importerror", "modulenotfounderror",
@@ -364,53 +443,55 @@ def run_selected(plan, base_url, expected_outcomes=None, timeout_seconds=30):
                 "connecterror", "connecttimeout", "readtimeout", "connection refused",
                 "remoteprotocolerror", "network is unreachable",
             ))
+            associated = [item for item in plan.get("items", []) if nodeid in item.get("test_nodeids", [])]
+            rule_ids = sorted({item.get("rule_id") for item in associated if isinstance(item.get("rule_id"), str)})
             if collection_error or proc.returncode not in (0, 1):
                 status, error_class = "ERROR", "COLLECTION_OR_RUNNER_ERROR"
             elif connection_error:
                 status, error_class = "ERROR", "API_CONNECTION_ERROR"
-            elif evidence and evidence.get("classification") == "SECURITY_REGRESSION":
-                status, error_class = "SECURITY_REGRESSION", "AUTHORIZATION_INVARIANT_VIOLATION"
-            elif evidence and evidence.get("classification") == "MALFORMED_RESPONSE":
-                status, error_class = "ERROR", "MALFORMED_API_RESPONSE"
-            elif evidence and evidence.get("classification") == "API_ERROR":
-                status, error_class = "ERROR", "API_RESPONSE_ERROR"
-            elif proc.returncode == 0:
-                status, error_class = "PASS", None
-            elif evidence and evidence.get("classification") == "POLICY_MISMATCH":
-                status, error_class = "POLICY_MISMATCH", "OBSERVED_BEHAVIOR_DIFFERS_FROM_POLICY"
             else:
-                status, error_class = "FAIL", "ASSERTION_FAILURE"
-            rc = proc.returncode
-            # Keep diagnostics bounded and omit headers/tokens and arbitrary response bodies.
-            safe_output = "\n".join(line for line in output.splitlines()
-                if not any(secret in line.lower() for secret in ("authorization:", "bearer ", "token-user-")))
+                status, error_class = _classify_evidence(evidence, expected_outcomes, rule_ids, proc.returncode)
+
+            # Diagnostics are bounded and omit credentials and arbitrary response data.
+            safe_output = "\n".join(
+                line for line in output.splitlines()
+                if not any(secret in line.lower() for secret in (
+                    "authorization:", "bearer ", "token-user-",
+                ))
+            )
             failure_lines = [line.strip() for line in safe_output.splitlines()
                              if "assert" in line.lower() or "error" in line.lower() or "failed" in line.lower()]
             failure = " | ".join(failure_lines[-4:])[:1200] or None
+            rc = proc.returncode
         except subprocess.TimeoutExpired:
-            duration, status, rc, error_class = round(time.monotonic() - started, 3), "TIMEOUT", 124, "TEST_TIMEOUT"
+            duration, status, rc, error_class = (
+                round(time.monotonic() - started, 3), "TIMEOUT", 124, "TEST_TIMEOUT"
+            )
             failure = "Selected test exceeded the execution timeout."
         except OSError as exc:
-            duration, status, rc, error_class = round(time.monotonic() - started, 3), "ERROR", 2, "RUNNER_START_ERROR"
+            duration, status, rc, error_class = (
+                round(time.monotonic() - started, 3), "ERROR", 2, "RUNNER_START_ERROR"
+            )
             failure = f"Could not start pytest ({type(exc).__name__})."
+
         statuses.append(status)
-        overall_rc = max(overall_rc, rc if rc else (2 if status in {"ERROR", "TIMEOUT"} else 0))
+        process_codes.append(rc)
         print(f"{nodeid}: {status} ({duration:.3f}s)")
         associated = [item for item in plan.get("items", []) if nodeid in item.get("test_nodeids", [])]
         results.append({
-            "test_nodeids": [nodeid], "rule_ids": sorted({item["rule_id"] for item in associated}),
-            "expected_outcomes": {item["rule_id"]: (expected_outcomes or {}).get(item["rule_id"])
-                                  for item in associated},
+            "test_nodeids": [nodeid], "rule_ids": sorted({
+                item["rule_id"] for item in associated if isinstance(item.get("rule_id"), str)
+            }),
+            "expected_outcomes": {item["rule_id"]: expected_outcomes.get(item["rule_id"])
+                                  for item in associated if isinstance(item.get("rule_id"), str)},
             "verdict": status, "return_code": rc,
             "duration_seconds": duration, "error_class": error_class,
             "evidence": evidence, "failure_details": failure,
             "response_bodies_recorded": False, "credentials_recorded": False,
         })
-    overall = ("ERROR" if "ERROR" in statuses else "TIMEOUT" if "TIMEOUT" in statuses else
-               "SECURITY_REGRESSION" if "SECURITY_REGRESSION" in statuses else
-               "POLICY_MISMATCH" if "POLICY_MISMATCH" in statuses else
-               "FAIL" if "FAIL" in statuses else "PASS")
-    return results, overall_rc, overall
+
+    overall = _aggregate_status(statuses)
+    return results, _aggregate_return_code(statuses, process_codes), overall
 
 
 def main(argv=None):
