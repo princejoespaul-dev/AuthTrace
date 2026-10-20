@@ -1,0 +1,60 @@
+name: Dashboard browser smoke test
+
+on:
+  push:
+    branches: [feat/dashboard-ux-refresh]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  chromium-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install app and browser-test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install playwright
+          python -m playwright install --with-deps chromium
+
+      - name: Start fixed demo API and dashboard
+        run: |
+          uvicorn demo_api:app --host 127.0.0.1 --port 8000 > /tmp/authtrace-demo.log 2>&1 &
+          uvicorn control_center:app --host 127.0.0.1 --port 8010 > /tmp/authtrace-dashboard.log 2>&1 &
+          for i in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:8000/health >/dev/null && curl -fsS http://127.0.0.1:8010/api/demo-mode >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/authtrace-demo.log
+          cat /tmp/authtrace-dashboard.log
+          exit 1
+
+      - name: Run Chromium UI smoke test
+        run: pytest -q tests/test_dashboard_browser.py
+
+      - name: Upload browser screenshots and service logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: authtrace-dashboard-browser-evidence
+          path: |
+            artifacts/
+            /tmp/authtrace-demo.log
+            /tmp/authtrace-dashboard.log
+          if-no-files-found: warn
