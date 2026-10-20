@@ -3,7 +3,7 @@ name: AuthTrace policy impact checks
 on:
   pull_request:
   push:
-    branches: [main, feat/policy-diff-tests-selection-2, feat/policy-diff-tests-selection-3]
+    branches: [main, feat/policy-diff-tests-selection-2, feat/policy-diff-tests-selection-3, feat/dashboard-ux-refresh]
 
 jobs:
   policy-impact:
