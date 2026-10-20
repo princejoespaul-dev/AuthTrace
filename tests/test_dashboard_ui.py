@@ -52,6 +52,13 @@ class DashboardUiSmokeTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertIn(text, self.html)
 
+    def test_demo_mode_indicator_is_live_and_unknown_by_default(self):
+        self.assertIn('id="demoMode"', self.html)
+        self.assertIn("Demo mode: Unknown", self.html)
+        self.assertIn("refreshDemoMode()", self.html)
+        self.assertIn("/api/demo-mode", self.html)
+        self.assertIn("Vulnerable", self.html)
+
     def test_navigation_has_accessible_label_and_current_page_state(self):
         self.assertIn('aria-label="Main navigation"', self.html)
         self.assertIn('aria-current', self.html)
