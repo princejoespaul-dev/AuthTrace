@@ -400,11 +400,11 @@ def _aggregate_return_code(statuses, process_codes):
     overall = _aggregate_status(statuses)
     if overall == "PASS":
         return 0
-    if overall in {"ERROR", "TIMEOUT"}:
-        # Preserve the runner's established timeout (124) and error (2) conventions.
-        if 124 in process_codes:
-            return 124
+    if overall == "ERROR":
         return 2
+    if overall == "TIMEOUT":
+        # Preserve the runner's established timeout exit-code convention.
+        return 124
     return 1
 
 
