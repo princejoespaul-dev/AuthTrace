@@ -449,7 +449,14 @@ def run_selected(plan, base_url, expected_outcomes=None, timeout_seconds=30):
             ))
             associated = [item for item in plan.get("items", []) if nodeid in item.get("test_nodeids", [])]
             rule_ids = sorted({item.get("rule_id") for item in associated if isinstance(item.get("rule_id"), str)})
-            if collection_error or proc.returncode not in (0, 1):
+            # Preserve explicit security findings even if pytest itself exits unexpectedly.
+            if (isinstance(evidence, dict) and
+                    (evidence.get("classification") in {"SECURITY_REGRESSION", "POLICY_MISMATCH"}
+                     or evidence.get("security_invariant_violated") is True)):
+                status, error_class = _classify_evidence(
+                    evidence, expected_outcomes, rule_ids, proc.returncode
+                )
+            elif collection_error or proc.returncode not in (0, 1):
                 status, error_class = "ERROR", "COLLECTION_OR_RUNNER_ERROR"
             elif connection_error:
                 status, error_class = "ERROR", "API_CONNECTION_ERROR"
