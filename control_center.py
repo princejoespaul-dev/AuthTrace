@@ -16,6 +16,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
+from urllib.request import urlopen
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
@@ -113,6 +114,25 @@ def home():
 def health():
     return {"status": "ok", "service": "AuthTrace Control Center", "time": now(),
             "demo_api_url": DEFAULT_TARGET}
+
+
+@app.get("/api/demo-mode")
+def demo_mode():
+    """Report the mode advertised by the live synthetic API health endpoint."""
+    try:
+        with urlopen(f"{DEFAULT_TARGET}/health", timeout=2) as response:
+            payload = json.loads(response.read(4096).decode("utf-8"))
+        mode = payload.get("mode") if isinstance(payload, dict) else None
+        if payload.get("status") != "ok" or mode not in {"fixed", "vulnerable"}:
+            return {"available": True, "mode": "unknown", "warning": None}
+        return {
+            "available": True,
+            "mode": mode,
+            "warning": "Vulnerable mode is for controlled local demonstration only."
+            if mode == "vulnerable" else None,
+        }
+    except Exception:
+        return {"available": False, "mode": "unknown", "warning": None}
 
 
 @app.get("/api/overview")
