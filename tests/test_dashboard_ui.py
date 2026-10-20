@@ -35,7 +35,7 @@ class DashboardUiSmokeTests(unittest.TestCase):
         self.assertIn("Unmapped rules are shown as coverage gaps", self.html)
 
     def test_policy_examples_explain_safe_and_unsafe_changes(self):
-        for text in ("Load secure example", "Load unsafe example", "INV-READ-OTHER",
+        for text in ("Load restrictive example", "Load unsafe example", "INV-READ-OTHER",
                      "Policy mismatch", "security invariant", "Validate policy"):
             with self.subTest(text=text):
                 self.assertIn(text, self.html)
