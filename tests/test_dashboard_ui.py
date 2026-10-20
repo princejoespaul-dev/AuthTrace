@@ -27,6 +27,9 @@ class DashboardUiSmokeTests(unittest.TestCase):
                 self.assertIn(label, self.html)
 
     def test_dashboard_preserves_local_demo_warning_and_test_workflow(self):
+        for step in ("Review policy changes", "Review the test selection", "Confirm execution"):
+            with self.subTest(step=step):
+                self.assertIn(step, self.html)
         self.assertIn("local synthetic API", self.html)
         self.assertIn("Run selected regression tests", self.html)
         self.assertIn("Unmapped rules are shown as coverage gaps", self.html)
