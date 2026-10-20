@@ -109,5 +109,38 @@ class PolicyApiTests(unittest.TestCase):
             self.assertIn("line", caught.exception.detail)
 
 
+class DemoModeStatusTests(unittest.TestCase):
+    def test_reports_fixed_mode_from_live_health_response(self):
+        response = unittest.mock.MagicMock()
+        response.read.return_value = b'{"status":"ok","mode":"fixed"}'
+        with patch("control_center.urlopen") as open_url:
+            open_url.return_value.__enter__.return_value = response
+            result = control_center.demo_mode()
+        self.assertEqual(result, {"available": True, "mode": "fixed", "warning": None})
+        open_url.assert_called_once_with("http://127.0.0.1:8000/health", timeout=2)
+
+    def test_warns_when_live_api_is_vulnerable(self):
+        response = unittest.mock.MagicMock()
+        response.read.return_value = b'{"status":"ok","mode":"vulnerable"}'
+        with patch("control_center.urlopen") as open_url:
+            open_url.return_value.__enter__.return_value = response
+            result = control_center.demo_mode()
+        self.assertEqual(result["mode"], "vulnerable")
+        self.assertIn("controlled local demonstration only", result["warning"])
+
+    def test_unknown_mode_is_not_guessed_when_api_is_unavailable(self):
+        with patch("control_center.urlopen", side_effect=TimeoutError):
+            result = control_center.demo_mode()
+        self.assertEqual(result, {"available": False, "mode": "unknown", "warning": None})
+
+    def test_unrecognized_health_mode_is_reported_as_unknown(self):
+        response = unittest.mock.MagicMock()
+        response.read.return_value = b'{"status":"ok","mode":"other"}'
+        with patch("control_center.urlopen") as open_url:
+            open_url.return_value.__enter__.return_value = response
+            result = control_center.demo_mode()
+        self.assertEqual(result, {"available": True, "mode": "unknown", "warning": None})
+
+
 if __name__ == "__main__":
     unittest.main()
