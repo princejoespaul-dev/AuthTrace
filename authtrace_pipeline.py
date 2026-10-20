@@ -417,7 +417,7 @@ def run_selected(plan, base_url, expected_outcomes=None, timeout_seconds=30):
     env["AUTH_TRACE_BASE_URL"] = base_url
     env["AUTH_TRACE_EXPECTED_OUTCOMES"] = json.dumps(expected_outcomes or {})
     expected_outcomes = expected_outcomes or {}
-    results, statuses, process_codes = [], [], []
+    results, statuses = [], []
 
     for nodeid in plan["selected_tests"]:
         started = time.monotonic()
@@ -479,7 +479,6 @@ def run_selected(plan, base_url, expected_outcomes=None, timeout_seconds=30):
             failure = f"Could not start pytest ({type(exc).__name__})."
 
         statuses.append(status)
-        process_codes.append(rc)
         print(f"{nodeid}: {status} ({duration:.3f}s)")
         associated = [item for item in plan.get("items", []) if nodeid in item.get("test_nodeids", [])]
         results.append({
