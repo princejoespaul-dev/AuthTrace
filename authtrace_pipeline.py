@@ -395,7 +395,7 @@ def _aggregate_status(statuses):
     return "INCONCLUSIVE"
 
 
-def _aggregate_return_code(statuses, process_codes):
+def _aggregate_return_code(statuses):
     """Keep pytest's ordinary failure code while ensuring every non-pass fails CI."""
     overall = _aggregate_status(statuses)
     if overall == "PASS":
@@ -495,7 +495,7 @@ def run_selected(plan, base_url, expected_outcomes=None, timeout_seconds=30):
         })
 
     overall = _aggregate_status(statuses)
-    return results, _aggregate_return_code(statuses, process_codes), overall
+    return results, _aggregate_return_code(statuses), overall
 
 
 def main(argv=None):
