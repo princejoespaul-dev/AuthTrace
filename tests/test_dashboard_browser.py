@@ -98,7 +98,7 @@ def test_dashboard_in_chromium():
         expect(page.locator("#runDetail")).to_contain_text("Technical report")
 
         # Open the same run through Evidence Explorer and ensure its detail panel works.
-        page.locator(".nav-more summary").click()
+        # The advanced menu remains expanded after visiting an advanced page.
         page.locator('button[data-page="evidence"]').click()
         expect(page.locator("#content h1")).to_contain_text("Evidence Explorer")
         page.locator("#evidenceDetail").locator("[data-run]").first.click()
