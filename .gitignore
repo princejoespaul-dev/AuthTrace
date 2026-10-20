@@ -2,4 +2,6 @@
 .venv312/
 __pycache__/
 .pytest_cache/
+reports/
 .env
+policy.proposed.json
