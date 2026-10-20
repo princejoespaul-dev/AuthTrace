@@ -34,6 +34,24 @@ class DashboardUiSmokeTests(unittest.TestCase):
         self.assertIn("Run selected regression tests", self.html)
         self.assertIn("Unmapped rules are shown as coverage gaps", self.html)
 
+    def test_policy_examples_explain_safe_and_unsafe_changes(self):
+        for text in ("Load secure example", "Load unsafe example", "INV-READ-OTHER",
+                     "Policy mismatch", "security invariant", "Validate and submit"):
+            with self.subTest(text=text):
+                self.assertIn(text, self.html)
+
+    def test_history_and_evidence_keep_result_detail_in_a_dedicated_panel(self):
+        for text in ("data-run=", "Selected result", "evidence-layout",
+                     "Choose a run on the left", "Loading run details"):
+            with self.subTest(text=text):
+                self.assertIn(text, self.html)
+
+    def test_coverage_gap_is_explained_as_untested_not_failed(self):
+        for text in ("cannot verify that change automatically", "A coverage gap is not a test failure",
+                     "test_mapping.json"):
+            with self.subTest(text=text):
+                self.assertIn(text, self.html)
+
     def test_navigation_has_accessible_label_and_current_page_state(self):
         self.assertIn('aria-label="Main navigation"', self.html)
         self.assertIn('aria-current', self.html)
