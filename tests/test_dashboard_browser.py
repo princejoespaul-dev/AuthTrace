@@ -60,6 +60,18 @@ def test_dashboard_in_chromium():
                 {"diff": "Policy Diff", "lab": "Test Lab", "runs": "Test Runs", "reports": "Reports"}[page_id]
             )
             expect(page.locator(f'button[data-page="{page_id}"]')).to_have_attribute("aria-current", "page")
+            if page_id == "diff":
+                policies_before = page.request.get(f"{BASE_URL}/api/policies").json()
+                page.locator('[data-example="unsafe"]').click()
+                expect(page.locator("#policyEditor")).to_contain_text('"expected": "allow"')
+                expect(page.locator("#policyMessage")).to_contain_text("editor only")
+                # Loading and validating examples must not silently submit them.
+                page.locator("#validatePolicy").click()
+                expect(page.locator("#policyMessage")).to_contain_text("VALID", timeout=10000)
+                policies_after = page.request.get(f"{BASE_URL}/api/policies").json()
+                assert policies_after["proposal_sha256"] == policies_before["proposal_sha256"], (
+                    "Loading/validating an example unexpectedly changed the submitted proposal"
+                )
 
         # Advanced pages remain navigable and render their actual content.
         page.locator(".nav-more summary").click()
